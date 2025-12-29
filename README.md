@@ -1,0 +1,2 @@
+# VibeDev
+Vibe Coder MCP
