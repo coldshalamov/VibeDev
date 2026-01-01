@@ -21,7 +21,8 @@ from typing import Any
 
 import aiosqlite
 
-from vibedev_mcp.repo import find_stale_candidates, snapshot_file_tree
+from vibedev_mcp.repo import analyze_dependencies, find_stale_candidates, snapshot_file_tree
+from vibedev_mcp.templates import CHECKPOINT_STEP_TEMPLATE, list_templates, get_template as get_builtin_template
 
 
 def _utc_now_iso() -> str:
@@ -183,8 +184,10 @@ class VibeDevStore:
               repo_root TEXT NOT NULL,
               file_tree TEXT NOT NULL,
               key_files_json TEXT NOT NULL,
+              dependencies_json TEXT,
               notes TEXT,
               FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
+
             );
 
             CREATE TABLE IF NOT EXISTS repo_map_entries (
@@ -194,6 +197,14 @@ class VibeDevStore:
               updated_at TEXT NOT NULL,
               PRIMARY KEY (job_id, path),
               FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS templates (
+              template_id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              description TEXT NOT NULL,
+              content_json TEXT NOT NULL,
+              created_at TEXT NOT NULL
             );
             """
         )
@@ -215,7 +226,23 @@ class VibeDevStore:
                 ("human_approved", "INTEGER DEFAULT 0"),
             ]
         )
+        await self._ensure_snapshot_columns(
+            [
+                ("dependencies_json", "TEXT"),
+            ]
+        )
         await self._conn.commit()
+
+    async def _ensure_snapshot_columns(self, columns: list[tuple[str, str]]) -> None:
+        async with self._conn.execute("PRAGMA table_info(repo_snapshots);") as cursor:
+            rows = await cursor.fetchall()
+        existing = {row["name"] for row in rows}
+
+        for name, decl in columns:
+            if name in existing:
+                continue
+            await self._conn.execute(f"ALTER TABLE repo_snapshots ADD COLUMN {name} {decl};")
+
 
     async def _ensure_jobs_columns(self, columns: list[tuple[str, str]]) -> None:
         async with self._conn.execute("PRAGMA table_info(jobs);") as cursor:
@@ -468,15 +495,17 @@ class VibeDevStore:
         *,
         job_id: str,
         repo_root: str,
+
         notes: str | None = None,
     ) -> dict[str, Any]:
         file_tree, key_files = snapshot_file_tree(repo_root)
+        dependencies = analyze_dependencies(repo_root)
         snapshot_id = _new_id("SNP", length=6)
         await self._conn.execute(
             """
             INSERT INTO repo_snapshots (
-              snapshot_id, job_id, timestamp, repo_root, file_tree, key_files_json, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?);
+              snapshot_id, job_id, timestamp, repo_root, file_tree, key_files_json, dependencies_json, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 snapshot_id,
@@ -485,12 +514,19 @@ class VibeDevStore:
                 repo_root,
                 file_tree,
                 json.dumps(key_files),
+                json.dumps(dependencies),
                 notes,
             ),
         )
         await self._conn.commit()
         excerpt = "\n".join(file_tree.splitlines()[:200])
-        return {"snapshot_id": snapshot_id, "file_tree_excerpt": excerpt, "key_files": key_files}
+        return {
+            "snapshot_id": snapshot_id,
+            "file_tree_excerpt": excerpt,
+            "key_files": key_files,
+            "dependencies": dependencies
+        }
+
 
     async def repo_file_descriptions_update(self, *, job_id: str, updates: dict[str, str]) -> dict[str, Any]:
         now = _utc_now_iso()
@@ -606,14 +642,113 @@ class VibeDevStore:
         )
         await self._conn.commit()
 
+    async def template_list(self) -> list[dict[str, Any]]:
+        builtin = list_templates()
+        async with self._conn.execute("SELECT template_id, title, description FROM templates ORDER BY created_at DESC;") as cursor:
+            rows = await cursor.fetchall()
+        custom = [dict(r) for r in rows]
+        return builtin + custom
+
+    async def template_get(self, template_id: str) -> dict[str, Any]:
+        try:
+            return get_builtin_template(template_id)
+        except KeyError:
+            pass
+
+        async with self._conn.execute("SELECT * FROM templates WHERE template_id = ?;", (template_id,)) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            raise KeyError(f"Unknown template_id: {template_id}")
+        
+        data = dict(row)
+        content = json.loads(data.pop("content_json"))
+        # Merge content into top-level
+        return {
+            "template_id": data["template_id"],
+            "title": data["title"],
+            "description": data["description"],
+            **content
+        }
+
+    async def template_save_from_job(self, *, job_id: str, title: str, description: str) -> str:
+        job = await self.get_job(job_id)
+        steps = await self.get_steps(job_id)
+        
+        # Clean steps for template (remove status, evidence, etc.)
+        template_steps = []
+        for s in steps:
+            template_steps.append({
+                "title": s["title"],
+                "instruction_prompt": s["instruction_prompt"],
+                "acceptance_criteria": s["acceptance_criteria"],
+                "required_evidence": s["required_evidence"],
+                "gates": s.get("gates", []),
+                "remediation_prompt": s.get("remediation_prompt", ""),
+                "context_refs": s.get("context_refs", []),
+                "expected_outputs": s.get("expected_outputs", []),
+            })
+
+        content = {
+            "recommended_policies": job.get("policies", {}),
+            "deliverables": job.get("deliverables", []),
+            "invariants": job.get("invariants", []),
+            "definition_of_done": job.get("definition_of_done", []),
+            "steps": template_steps
+        }
+
+        template_id = _new_id("TPL")
+        await self._conn.execute(
+            "INSERT INTO templates (template_id, title, description, content_json, created_at) VALUES (?, ?, ?, ?, ?);",
+            (template_id, title, description, json.dumps(content), _utc_now_iso())
+        )
+        await self._conn.commit()
+        return template_id
+
+    async def template_delete(self, template_id: str) -> bool:
+        cursor = await self._conn.execute("DELETE FROM templates WHERE template_id = ?;", (template_id,))
+        await self._conn.commit()
+        return cursor.rowcount > 0 
+
+
     async def plan_propose_steps(self, job_id: str, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
         step_ids: list[str] = []
 
+        if not steps:
+            # If empty list is passed, just clear the steps.
+            await self._conn.execute("DELETE FROM steps WHERE job_id = ?;", (job_id,))
+            await self._conn.execute(
+                "UPDATE jobs SET step_order_json = ?, current_step_index = 0, updated_at = ? WHERE job_id = ?;",
+                (json.dumps([]), _utc_now_iso(), job_id),
+            )
+            await self._conn.commit()
+            return []
+
+        # 1. Get policy to see if we should inject checkpoints.
+        job = await self.get_job(job_id)
+        policies = job.get("policies") or {}
+        chk_interval = policies.get("checkpoint_interval_steps", 0)
+
+        final_steps_input = []
+        if chk_interval > 0:
+            execution_count = 0
+            for s in steps:
+                final_steps_input.append(s)
+                execution_count += 1
+                if execution_count % chk_interval == 0:
+                    # Inject checkpoint
+                    cp = dict(CHECKPOINT_STEP_TEMPLATE)
+                    cp["title"] = f"Checkpoint {execution_count // chk_interval}: Verify Code & Regressions"
+                    # Checkpoints generally don't have a fixed ID unless we assign one,
+                    # but the loop below assigns S{idx} if missing.
+                    final_steps_input.append(cp)
+        else:
+            final_steps_input = steps
+
         # Replace the full step list atomically.
         await self._conn.execute("DELETE FROM steps WHERE job_id = ?;", (job_id,))
 
-        for idx, step in enumerate(steps, start=1):
+        for idx, step in enumerate(final_steps_input, start=1):
             step_id = step.get("step_id") or f"S{idx}"
             step_ids.append(step_id)
             normalized_step = {

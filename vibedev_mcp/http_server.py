@@ -15,7 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibedev_mcp.conductor import compute_next_questions
 from vibedev_mcp.store import VibeDevStore
-from vibedev_mcp.templates import get_template, list_templates
+# from vibedev_mcp.templates import get_template, list_templates # Moved to store
+
 
 
 def _default_db_path() -> Path:
@@ -37,6 +38,7 @@ DEFAULT_POLICIES: dict[str, Any] = {
     # Safety: shell-executing gates are opt-in and allowlisted per job.
     "enable_shell_gates": False,
     "shell_gate_allowlist": [],
+    "checkpoint_interval_steps": 5,
 }
 
 
@@ -112,6 +114,14 @@ class RepoMapUpdateInput(BaseModel):
     updates: dict[str, str] = Field(default_factory=dict)
 
 
+class CreateTemplateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+
+
+
 class ApplyTemplateInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -164,9 +174,31 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
     # -------------------------------------------------------------------------
 
     @app.get("/api/templates")
-    async def templates() -> dict[str, Any]:
-        templates = list_templates()
+    async def templates(request: Request) -> dict[str, Any]:
+        store = store_from(request)
+        templates = await store.template_list()
         return {"count": len(templates), "templates": templates}
+
+    @app.post("/api/templates")
+    async def create_template(payload: CreateTemplateInput, request: Request) -> dict[str, Any]:
+        store = store_from(request)
+        template_id = await store.template_save_from_job(
+            job_id=payload.job_id,
+            title=payload.title,
+            description=payload.description
+        )
+        return {"template_id": template_id}
+
+    @app.delete("/api/templates/{template_id}")
+    async def delete_template(template_id: str, request: Request) -> dict[str, Any]:
+        store = store_from(request)
+        deleted = await store.template_delete(template_id)
+        if not deleted:
+            # Maybe it's built-in or doesn't exist.
+            # Check if it exists as built-in to give better error?
+            # For now, just return 404 or false.
+            raise HTTPException(status_code=404, detail="Template not found or cannot be deleted")
+        return {"ok": True}
 
     @app.post("/api/jobs")
     async def create_job(payload: CreateJobInput, request: Request) -> dict[str, Any]:
@@ -266,7 +298,7 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         request: Request,
     ) -> dict[str, Any]:
         store = store_from(request)
-        template = get_template(template_id)
+        template = await store.template_get(template_id)
 
         # Policies: always merge in the template's recommended policies.
         await store.job_update_policies(

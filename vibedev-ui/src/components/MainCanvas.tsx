@@ -15,6 +15,23 @@ import {
   useSetJobReady,
 } from '@/hooks/useUIState';
 import { cn } from '@/lib/utils';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 export function MainCanvas() {
   const uiState = useVibeDevStore((state) => state.uiState);
@@ -217,20 +234,54 @@ function QuestionField({
 function StepCreationSection({ jobId }: { jobId: string }) {
   const [steps, setSteps] = useState<
     Array<{
+      id: string;
       title: string;
       instruction_prompt: string;
       acceptance_criteria: string;
       required_evidence: string;
     }>
-  >([{ title: '', instruction_prompt: '', acceptance_criteria: '', required_evidence: '' }]);
+  >([
+    {
+      id: 'init-1',
+      title: '',
+      instruction_prompt: '',
+      acceptance_criteria: '',
+      required_evidence: '',
+    },
+  ]);
 
   const proposeStepsMutation = useProposeSteps(jobId);
   const applyTemplateMutation = useApplyTemplate(jobId);
 
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setSteps((items) => {
+        const oldIndex = items.findIndex((i) => i.id === active.id);
+        const newIndex = items.findIndex((i) => i.id === over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
+
   const addStep = () => {
     setSteps([
       ...steps,
-      { title: '', instruction_prompt: '', acceptance_criteria: '', required_evidence: '' },
+      {
+        id: Date.now().toString(),
+        title: '',
+        instruction_prompt: '',
+        acceptance_criteria: '',
+        required_evidence: '',
+      },
     ]);
   };
 
@@ -286,61 +337,26 @@ function StepCreationSection({ jobId }: { jobId: string }) {
         </button>
       </div>
 
-      <div className="space-y-4">
-        {steps.map((step, index) => (
-          <div key={index} className="p-4 border rounded-lg relative">
-            <div className="absolute top-2 right-2 flex gap-1">
-              <button
-                onClick={() => removeStep(index)}
-                className="text-muted-foreground hover:text-destructive p-1"
-                title="Remove step"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="text-sm font-medium text-muted-foreground mb-2">
-              Step {index + 1}
-            </div>
-
-            <div className="space-y-3">
-              <input
-                type="text"
-                placeholder="Step title"
-                value={step.title}
-                onChange={(e) => updateStep(index, 'title', e.target.value)}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={steps.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+          <div className="space-y-4">
+            {steps.map((step, index) => (
+              <SortableStepItem
+                key={step.id}
+                id={step.id}
+                step={step}
+                index={index}
+                updateStep={updateStep}
+                removeStep={removeStep}
               />
-
-              <textarea
-                placeholder="Instruction prompt (what the AI should do)"
-                value={step.instruction_prompt}
-                onChange={(e) => updateStep(index, 'instruction_prompt', e.target.value)}
-                rows={3}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-              />
-
-              <textarea
-                placeholder="Acceptance criteria (one per line)"
-                value={step.acceptance_criteria}
-                onChange={(e) => updateStep(index, 'acceptance_criteria', e.target.value)}
-                rows={2}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-              />
-
-              <textarea
-                placeholder="Required evidence (one per line)"
-                value={step.required_evidence}
-                onChange={(e) => updateStep(index, 'required_evidence', e.target.value)}
-                rows={2}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-              />
-            </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </SortableContext>
+      </DndContext>
 
       <div className="mt-4 flex justify-end">
         <button
@@ -534,6 +550,124 @@ function ReadyTransitionSection({
         >
           {setReadyMutation.isPending ? 'Transitioning...' : 'Mark as Ready'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function SortableStepItem({
+  id,
+  step,
+  index,
+  updateStep,
+  removeStep,
+}: {
+  id: string;
+  step: any;
+  index: number;
+  updateStep: (index: number, field: string, value: string) => void;
+  removeStep: (index: number) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : 1,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        'p-4 border rounded-lg relative bg-card',
+        isDragging && 'ring-2 ring-primary'
+      )}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        className="absolute top-4 left-2 cursor-move p-1 text-muted-foreground hover:text-foreground"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="9" cy="12" r="1" />
+          <circle cx="9" cy="5" r="1" />
+          <circle cx="9" cy="19" r="1" />
+          <circle cx="15" cy="12" r="1" />
+          <circle cx="15" cy="5" r="1" />
+          <circle cx="15" cy="19" r="1" />
+        </svg>
+      </div>
+
+      <div className="pl-6">
+        <div className="absolute top-2 right-2 flex gap-1">
+          <button
+            onClick={() => removeStep(index)}
+            className="text-muted-foreground hover:text-destructive p-1"
+            title="Remove step"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <div className="text-sm font-medium text-muted-foreground mb-2">Step {index + 1}</div>
+
+        <div className="space-y-3">
+          <input
+            type="text"
+            placeholder="Step title"
+            value={step.title}
+            onChange={(e) => updateStep(index, 'title', e.target.value)}
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+
+          <textarea
+            placeholder="Instruction prompt (what the AI should do)"
+            value={step.instruction_prompt}
+            onChange={(e) => updateStep(index, 'instruction_prompt', e.target.value)}
+            rows={3}
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+          />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <textarea
+              placeholder="Acceptance criteria (one per line)"
+              value={step.acceptance_criteria}
+              onChange={(e) => updateStep(index, 'acceptance_criteria', e.target.value)}
+              rows={2}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+            />
+
+            <textarea
+              placeholder="Required evidence (one per line)"
+              value={step.required_evidence}
+              onChange={(e) => updateStep(index, 'required_evidence', e.target.value)}
+              rows={2}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -135,7 +135,7 @@ function PausedView({
     <div className="flex h-full items-center justify-center">
       <div className="text-center">
         <div className="text-6xl mb-4">⏸️</div>
-        <h2 className="text-xl font-semibold mb-2">Execution Paused</h2> 
+        <h2 className="text-xl font-semibold mb-2">Execution Paused</h2>
         <p className="text-muted-foreground mb-6">
           {job.title} is currently paused.
         </p>
@@ -356,7 +356,7 @@ function ActiveStepPanel({
           </button>
         </div>
         <div className="prose prose-sm dark:prose-invert max-w-none">
-          <p className="whitespace-pre-wrap">{step.instruction_prompt}</p>      
+          <p className="whitespace-pre-wrap">{step.instruction_prompt}</p>
         </div>
       </div>
 
@@ -433,9 +433,9 @@ function ActiveStepPanel({
                 className={cn(
                   'p-3 rounded-lg border',
                   attempt.outcome === 'accepted' &&
-                    'bg-green-50 border-green-200 dark:bg-green-900/20',
+                  'bg-green-50 border-green-200 dark:bg-green-900/20',
                   attempt.outcome === 'rejected' &&
-                    'bg-red-50 border-red-200 dark:bg-red-900/20'
+                  'bg-red-50 border-red-200 dark:bg-red-900/20'
                 )}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -444,7 +444,7 @@ function ActiveStepPanel({
                     className={cn(
                       'text-xs px-2 py-0.5 rounded-full',
                       attempt.outcome === 'accepted' &&
-                        'bg-green-200 text-green-800',
+                      'bg-green-200 text-green-800',
                       attempt.outcome === 'rejected' && 'bg-red-200 text-red-800'
                     )}
                   >
@@ -454,15 +454,15 @@ function ActiveStepPanel({
                 <p className="text-sm text-muted-foreground">{attempt.summary}</p>
                 {(attempt.missing_fields?.length > 0 ||
                   attempt.rejection_reasons?.length > 0) && (
-                  <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-                    {attempt.missing_fields?.length > 0 && (
-                      <div>Missing: {attempt.missing_fields.join(', ')}</div>
-                    )}
-                    {attempt.rejection_reasons?.length > 0 && (
-                      <div>Reasons: {attempt.rejection_reasons.join(' | ')}</div>
-                    )}
-                  </div>
-                )}
+                    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                      {attempt.missing_fields?.length > 0 && (
+                        <div>Missing: {attempt.missing_fields.join(', ')}</div>
+                      )}
+                      {attempt.rejection_reasons?.length > 0 && (
+                        <div>Reasons: {attempt.rejection_reasons.join(' | ')}</div>
+                      )}
+                    </div>
+                  )}
               </div>
             ))}
           </div>
@@ -508,6 +508,7 @@ function SubmitResultForm({
   const [evidence, setEvidence] = useState('');
   const [devlogLine, setDevlogLine] = useState('');
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'FORM' | 'JSON'>('FORM');
 
   const submitMutation = useSubmitStepResult(jobId);
 
@@ -548,6 +549,17 @@ function SubmitResultForm({
     onClose();
   };
 
+  const handleFormChange = (newObj: any) => {
+    setEvidence(JSON.stringify(newObj, null, 2));
+  };
+
+  let parsedObj: any = {};
+  try {
+    parsedObj = JSON.parse(evidence || '{}');
+  } catch (e) {
+    // ignore
+  }
+
   return (
     <form onSubmit={handleSubmit} className="panel animate-fade-in">
       <div className="panel-header">
@@ -570,8 +582,8 @@ function SubmitResultForm({
                     ? c === 'MET'
                       ? 'bg-green-500 text-white border-green-500'
                       : c === 'PARTIAL'
-                      ? 'bg-yellow-500 text-white border-yellow-500'
-                      : 'bg-red-500 text-white border-red-500'
+                        ? 'bg-yellow-500 text-white border-yellow-500'
+                        : 'bg-red-500 text-white border-red-500'
                     : 'bg-background hover:bg-accent'
                 )}
               >
@@ -596,19 +608,52 @@ function SubmitResultForm({
 
         {/* Evidence */}
         <div>
-          <label className="block text-sm font-medium mb-1">Evidence</label>
-          <p className="text-xs text-muted-foreground mb-2">
-            Paste the EvidenceSchema JSON object here (this is sent to the verifier as structured data).
-          </p>
-          <textarea
-            value={evidence}
-            onChange={(e) => setEvidence(e.target.value)}
-            rows={4}
-            placeholder="Paste EvidenceSchema JSON (from the step prompt template)..."
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring resize-none"     
-          />
-          {evidenceError && (
-            <p className="text-sm text-red-600 mt-2">{evidenceError}</p>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-medium">Evidence</label>
+            <div className="flex border rounded overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setViewMode('FORM')}
+                className={cn(
+                  'px-3 py-1 text-xs',
+                  viewMode === 'FORM' ? 'bg-primary text-white' : 'bg-muted hover:bg-muted/80'
+                )}
+              >
+                Form
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('JSON')}
+                className={cn(
+                  'px-3 py-1 text-xs',
+                  viewMode === 'JSON' ? 'bg-primary text-white' : 'bg-muted hover:bg-muted/80'
+                )}
+              >
+                JSON
+              </button>
+            </div>
+          </div>
+
+          {viewMode === 'FORM' ? (
+            <div className="border rounded-md p-4 bg-muted/10 space-y-4">
+              <DynamicEvidenceForm value={parsedObj} onChange={handleFormChange} />
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground mb-2">
+                Paste the EvidenceSchema JSON object here.
+              </p>
+              <textarea
+                value={evidence}
+                onChange={(e) => setEvidence(e.target.value)}
+                rows={4}
+                placeholder="Paste EvidenceSchema JSON..."
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+              />
+              {evidenceError && (
+                <p className="text-sm text-red-600 mt-2">{evidenceError}</p>
+              )}
+            </>
           )}
         </div>
 
@@ -642,6 +687,127 @@ function SubmitResultForm({
       </div>
     </form>
   );
+}
+
+function DynamicEvidenceForm({
+  value,
+  onChange,
+  path = [],
+}: {
+  value: any;
+  onChange: (val: any) => void;
+  path?: string[];
+}) {
+  if (value === null || value === undefined) {
+    return <span className="text-muted-foreground italic">null</span>;
+  }
+
+  if (typeof value === 'boolean') {
+    return (
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={(e) => onChange(e.target.checked)}
+          className="rounded border-gray-300"
+        />
+        <span className="text-sm">{path[path.length - 1] || 'Value'}</span>
+      </div>
+    );
+  }
+
+  if (typeof value === 'string') {
+    // If key contains "checklist" or "files", maybe suggest lines?
+    // For now simple text input
+    return (
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      />
+    );
+  }
+
+  if (typeof value === 'number') {
+    return (
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      />
+    );
+  }
+
+  if (Array.isArray(value)) {
+    const isStringArray = value.every((item) => typeof item === 'string');
+
+    return (
+      <div className="space-y-2">
+        {value.map((item, i) => (
+          <div key={i} className="flex gap-2">
+            <div className="flex-1">
+              <DynamicEvidenceForm
+                value={item}
+                path={[...path, String(i)]}
+                onChange={(newVal) => {
+                  const newArr = [...value];
+                  newArr[i] = newVal;
+                  onChange(newArr);
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+              className="text-muted-foreground hover:text-destructive p-1"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => onChange([...value, isStringArray ? '' : {}])}
+          className="text-xs flex items-center gap-1 text-primary hover:underline"
+        >
+          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          Add Item
+        </button>
+      </div>
+    );
+  }
+
+  if (typeof value === 'object') {
+    return (
+      <div className="space-y-3 pl-2 border-l-2 border-muted">
+        {Object.entries(value).map(([key, val]) => (
+          <div key={key}>
+            <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">
+              {key.replace(/_/g, ' ')}
+            </label>
+            <DynamicEvidenceForm
+              value={val}
+              path={[...path, key]}
+              onChange={(newVal) => onChange({ ...value, [key]: newVal })}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <div>Unknown Type</div>;
 }
 
 function ActivityLogPanel({ logs, jobId }: { logs: any[]; jobId: string }) {

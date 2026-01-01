@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
+
 
 
 DEFAULT_IGNORE_DIRS = {
@@ -113,3 +115,57 @@ def find_stale_candidates(
             if len(out) >= max_results:
                 return out
     return out
+
+
+def analyze_dependencies(
+    repo_root: str | Path,
+    *,
+    ignore_dirs: set[str] | None = None,
+) -> dict[str, list[str]]:
+    """
+    Analyze file dependencies using regex heuristics.
+    Returns adjacency list: { "path/to/file": ["import1", "import2"] }
+    """
+    root = Path(repo_root).resolve()
+    ignores = DEFAULT_IGNORE_DIRS if ignore_dirs is None else ignore_dirs
+    dependencies: dict[str, list[str]] = {}
+
+    # Regex patterns
+    # Python: from x import y, import x
+    re_py_import = re.compile(r"^\s*(?:from|import)\s+([\w\.]+)")
+    
+    # JS/TS: import ... from 'x', require('x')
+    re_js_import = re.compile(r"(?:import\s+.*?from\s+['\"]|require\(['\"])([^'\"]+)['\"]")
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in ignores]
+        
+        for fname in filenames:
+            ext = os.path.splitext(fname)[1].lower()
+            if ext not in {".py", ".js", ".ts", ".tsx", ".jsx"}:
+                continue
+            
+            fpath = (Path(dirpath) / fname)
+            rel_path = str(fpath.resolve().relative_to(root)).replace("\\", "/")
+            
+            deps = set()
+            try:
+                content = fpath.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+
+            if ext == ".py":
+                for line in content.splitlines():
+                    m = re_py_import.match(line)
+                    if m:
+                        deps.add(m.group(1))
+            else:
+                # JS/TS - simpler to scan whole content for matches
+                # (naive but effective for "RepoMap")
+                for m in re_js_import.finditer(content):
+                    deps.add(m.group(1))
+            
+            if deps:
+                dependencies[rel_path] = sorted(list(deps))
+
+    return dependencies

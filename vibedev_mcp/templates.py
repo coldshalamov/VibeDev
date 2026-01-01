@@ -16,6 +16,28 @@ def list_templates() -> list[dict[str, Any]]:
     ]
 
 
+CHECKPOINT_STEP_TEMPLATE = {
+    "title": "Checkpoint: Verify Code & Regressions",
+    "instruction_prompt": (
+        "Run the full test suite to ensure no regressions were introduced. "
+        "If any tests fail, fix them before proceeding. "
+        "Also verify that the recent changes align with the goal."
+    ),
+    "acceptance_criteria": [
+        "All tests pass (no regressions)",
+        "Recent changes verified correct",
+    ],
+    "required_evidence": ["tests_run", "tests_passed", "commands_run"],
+    "gates": [
+        {
+            "type": "command_exit_0",
+            "parameters": {"command": "python -m pytest", "timeout": 600},
+            "description": "Full regression suite must pass.",
+        }
+    ],
+}
+
+
 def get_template(template_id: str) -> dict[str, Any]:
     if template_id != "strict_feature":
         raise KeyError(f"Unknown template_id: {template_id}")
