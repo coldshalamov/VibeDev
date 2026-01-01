@@ -9,3 +9,4 @@ __pycache__/
 
 .DS_Store
 tests/test_execution.py
+.autonomous/audit/session.log
