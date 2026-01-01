@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibedev_mcp.conductor import compute_next_questions
 from vibedev_mcp.store import VibeDevStore
+from vibedev_mcp.templates import get_template, list_templates
 
 
 def _default_db_path() -> Path:
@@ -33,6 +34,9 @@ DEFAULT_POLICIES: dict[str, Any] = {
     "evidence_schema_mode": "loose",
     "max_retries_per_step": 2,
     "retry_exhausted_action": "PAUSE_FOR_HUMAN",
+    # Safety: shell-executing gates are opt-in and allowlisted per job.
+    "enable_shell_gates": False,
+    "shell_gate_allowlist": [],
 }
 
 
@@ -108,6 +112,13 @@ class RepoMapUpdateInput(BaseModel):
     updates: dict[str, str] = Field(default_factory=dict)
 
 
+class ApplyTemplateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    overwrite_planning_artifacts: bool = False
+    overwrite_steps: bool = True
+
+
 def create_app(*, db_path: Path | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -151,6 +162,11 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
     # -------------------------------------------------------------------------
     # Jobs
     # -------------------------------------------------------------------------
+
+    @app.get("/api/templates")
+    async def templates() -> dict[str, Any]:
+        templates = list_templates()
+        return {"count": len(templates), "templates": templates}
 
     @app.post("/api/jobs")
     async def create_job(payload: CreateJobInput, request: Request) -> dict[str, Any]:
@@ -242,8 +258,45 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         normalized = await store.plan_refine_steps(job_id, payload.edits)
         return {"ok": True, "steps": normalized}
 
+    @app.post("/api/jobs/{job_id}/templates/{template_id}/apply")
+    async def apply_template(
+        job_id: str,
+        template_id: str,
+        payload: ApplyTemplateInput,
+        request: Request,
+    ) -> dict[str, Any]:
+        store = store_from(request)
+        template = get_template(template_id)
+
+        # Policies: always merge in the template's recommended policies.
+        await store.job_update_policies(
+            job_id=job_id,
+            update=template.get("recommended_policies") or {},
+            merge=True,
+        )
+
+        job = await store.get_job(job_id)
+
+        # Planning artifacts: optionally overwrite, otherwise fill only if empty.
+        if payload.overwrite_planning_artifacts or not job.get("deliverables"):
+            await store.plan_set_deliverables(job_id, template.get("deliverables") or [])
+        if payload.overwrite_planning_artifacts or job.get("invariants") is None:
+            await store.plan_set_invariants(job_id, template.get("invariants") or [])
+        if payload.overwrite_planning_artifacts or not job.get("definition_of_done"):
+            await store.plan_set_definition_of_done(
+                job_id, template.get("definition_of_done") or []
+            )
+
+        steps_out: list[dict[str, Any]] = []
+        if payload.overwrite_steps:
+            await store.plan_propose_steps(job_id, template.get("steps") or [])
+            steps_out = await store.get_steps(job_id)
+
+        job = await store.get_job(job_id)
+        return {"ok": True, "job": job, "steps": steps_out}
+
     @app.post("/api/jobs/{job_id}/ready")
-    async def set_ready(job_id: str, request: Request) -> dict[str, Any]:
+    async def set_ready(job_id: str, request: Request) -> dict[str, Any]:       
         store = store_from(request)
         return await store.job_set_ready(job_id)
 

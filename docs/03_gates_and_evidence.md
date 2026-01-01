@@ -53,63 +53,66 @@ Each Gate has:
 1. `command_exit_0`
    - parameters: `{ "command": "…" }`
    - passes if command exits 0.
-   - TODO if not implemented as a first-class gate.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
+   - Safety: execution is **opt-in** via `Job.policies.enable_shell_gates=true` and allowlisted by `Job.policies.shell_gate_allowlist[]`.
 
 2. `command_output_contains`
    - parameters: `{ "command": "…", "contains": "…" }`
    - passes if stdout contains substring.
-   - TODO if not implemented as a first-class gate.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
+   - Safety: execution is **opt-in** via `Job.policies.enable_shell_gates=true` and allowlisted by `Job.policies.shell_gate_allowlist[]`.
 
 3. `command_output_regex`
-   - parameters: `{ "command": "…", "pattern": "…" }`
+   - parameters: `{ "command": "…", "pattern": "…" }` 
    - passes if stdout matches regex.
-   - TODO if not implemented as a first-class gate.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
+   - Safety: execution is **opt-in** via `Job.policies.enable_shell_gates=true` and allowlisted by `Job.policies.shell_gate_allowlist[]`.
 
 ### File system gates
 
 4. `file_exists`
    - parameters: `{ "path": "…" }`
    - passes if file exists.
-   - TODO if not implemented as a first-class gate.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 5. `file_not_exists`
    - parameters: `{ "path": "…" }`
    - passes if file does not exist.
-   - TODO if not implemented as a first-class gate.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 ### Change control gates
 
 6. `changed_files_allowlist`
    - parameters: `{ "allowed": ["…"] }`
    - passes if every changed file is within allowlist patterns.
-   - TODO if not implemented as a first-class gate.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 7. `changed_files_minimum`
    - parameters: `{ "paths": ["…"], "min_count": 1 }`
    - passes if at least `min_count` of the `paths` were changed.
-   - TODO if not implemented.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 8. `forbid_paths`
    - parameters: `{ "paths": ["…"] }`
    - passes if none of the forbidden paths were touched.
-   - TODO if not implemented.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 9. `diff_max_lines`
    - parameters: `{ "max": 200 }`
    - passes if the diff is not too large.
-   - TODO if not implemented.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 10. `diff_min_lines`
    - parameters: `{ "min": 1 }`
    - passes if the diff is non-empty.
-   - TODO if not implemented.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 ### Schema / structured proof gates
 
 11. `json_schema_valid`
-   - parameters: `{ "path": "…", "schema_id": "…" }`
-   - passes if JSON file validates against known schema.
-   - TODO if not implemented.
+   - parameters: `{ "path": "…", "schema": {…} }`
+   - passes if JSON file matches a simple schema (minimal type + required keys).
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 12. `criteria_checklist_complete`
    - parameters: `{ }`
@@ -121,12 +124,12 @@ Each Gate has:
 13. `patch_applies_cleanly`
    - parameters: `{ "patch": "…" }`
    - passes if patch applies without conflicts.
-   - TODO if not implemented.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 14. `no_uncommitted_changes`
    - parameters: `{ }`
    - passes if `git status` is clean.
-   - TODO if not implemented as a first-class gate.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 ### Test/lint gates
 
@@ -138,14 +141,14 @@ Each Gate has:
 16. `lint_passed`
    - parameters: `{ }`
    - passes if EvidenceSchema indicates lint passed.
-   - TODO if not implemented as a first-class gate.
+   - Implemented in backend verifier (`vibedev_mcp/store.py`).
 
 ### Human gate
 
 17. `human_approval`
    - parameters: `{ }`
-   - passes only when a human approves in the Studio UI (or via tool call).
-   - TODO if not implemented (policy-dependent).
+   - passes only when a human approves in the Studio UI (or via tool call).     
+   - Implemented in backend verifier (`vibedev_mcp/store.py`) via step approval flag.
 
 ---
 
@@ -210,4 +213,3 @@ Reasons: missing `tests_run`, missing `commands_run`, missing changed files list
 | Gate types | StepTemplate fields | `StepTemplate.gates[]` |
 | Truthfulness semantics | Verifier behavior | (Verifier policy) |
 | Human approval | FlowGraph transition | `RunnerAction.PAUSE_FOR_HUMAN` / UI |
-

@@ -8,6 +8,7 @@ and repository snapshots.
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import re
 import secrets
@@ -259,6 +260,27 @@ class VibeDevStore:
         data["step_order"] = json.loads(data.pop("step_order_json") or "[]")
         data["planning_answers"] = json.loads(data.pop("planning_answers_json") or "{}")
         return data
+
+    async def job_update_policies(
+        self,
+        *,
+        job_id: str,
+        update: dict[str, Any],
+        merge: bool = True,
+    ) -> dict[str, Any]:
+        job = await self.get_job(job_id)
+        policies = dict(job.get("policies") or {})
+        if merge:
+            policies.update(update or {})
+        else:
+            policies = dict(update or {})
+
+        await self._conn.execute(
+            "UPDATE jobs SET policies_json = ?, updated_at = ? WHERE job_id = ?;",
+            (json.dumps(policies), _utc_now_iso(), job_id),
+        )
+        await self._conn.commit()
+        return await self.get_job(job_id)
 
     async def conductor_merge_answers(self, job_id: str, answers: dict[str, Any]) -> dict[str, Any]:
         job = await self.get_job(job_id)
@@ -903,6 +925,31 @@ class VibeDevStore:
                     )
                     continue
 
+                policies = job.get("policies") or {}
+                if not policies.get("enable_shell_gates"):
+                    failures.append(
+                        "Gate command_exit_0 failed: blocked by policy (enable_shell_gates is false)."
+                    )
+                    continue
+                allowlist = policies.get("shell_gate_allowlist") or []
+                if not isinstance(allowlist, list) or not all(
+                    isinstance(p, str) for p in allowlist
+                ):
+                    failures.append(
+                        "Gate command_exit_0 failed: misconfigured policy (shell_gate_allowlist must be a list of strings)."
+                    )
+                    continue
+                if not allowlist:
+                    failures.append(
+                        "Gate command_exit_0 failed: blocked by policy (shell_gate_allowlist is empty)."
+                    )
+                    continue
+                if not any(fnmatch.fnmatchcase(command, pat) for pat in allowlist):
+                    failures.append(
+                        "Gate command_exit_0 failed (allowlist): command is not permitted."
+                    )
+                    continue
+
                 timeout_secs = params.get("timeout", 60)
                 if not isinstance(timeout_secs, (int, float)) or timeout_secs <= 0:
                     timeout_secs = 60
@@ -943,6 +990,31 @@ class VibeDevStore:
                 if not isinstance(contains, str):
                     failures.append(
                         "Gate command_output_contains misconfigured: parameters.contains must be a string."
+                    )
+                    continue
+
+                policies = job.get("policies") or {}
+                if not policies.get("enable_shell_gates"):
+                    failures.append(
+                        "Gate command_output_contains failed: blocked by policy (enable_shell_gates is false)."
+                    )
+                    continue
+                allowlist = policies.get("shell_gate_allowlist") or []
+                if not isinstance(allowlist, list) or not all(
+                    isinstance(p, str) for p in allowlist
+                ):
+                    failures.append(
+                        "Gate command_output_contains failed: misconfigured policy (shell_gate_allowlist must be a list of strings)."
+                    )
+                    continue
+                if not allowlist:
+                    failures.append(
+                        "Gate command_output_contains failed: blocked by policy (shell_gate_allowlist is empty)."
+                    )
+                    continue
+                if not any(fnmatch.fnmatchcase(command, pat) for pat in allowlist):
+                    failures.append(
+                        "Gate command_output_contains failed (allowlist): command is not permitted."
                     )
                     continue
 
@@ -990,6 +1062,31 @@ class VibeDevStore:
                 if not isinstance(pattern, str):
                     failures.append(
                         "Gate command_output_regex misconfigured: parameters.pattern must be a string."
+                    )
+                    continue
+
+                policies = job.get("policies") or {}
+                if not policies.get("enable_shell_gates"):
+                    failures.append(
+                        "Gate command_output_regex failed: blocked by policy (enable_shell_gates is false)."
+                    )
+                    continue
+                allowlist = policies.get("shell_gate_allowlist") or []
+                if not isinstance(allowlist, list) or not all(
+                    isinstance(p, str) for p in allowlist
+                ):
+                    failures.append(
+                        "Gate command_output_regex failed: misconfigured policy (shell_gate_allowlist must be a list of strings)."
+                    )
+                    continue
+                if not allowlist:
+                    failures.append(
+                        "Gate command_output_regex failed: blocked by policy (shell_gate_allowlist is empty)."
+                    )
+                    continue
+                if not any(fnmatch.fnmatchcase(command, pat) for pat in allowlist):
+                    failures.append(
+                        "Gate command_output_regex failed (allowlist): command is not permitted."
                     )
                     continue
 

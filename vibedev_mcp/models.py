@@ -94,9 +94,11 @@ class Policies(BaseModel):
     require_repo_snapshot_on_init: bool = False
     inject_invariants_every_step: bool = True
     inject_mistakes_every_step: bool = True
-    evidence_schema_mode: EvidenceSchemaMode = EvidenceSchemaMode.LOOSE   
+    evidence_schema_mode: EvidenceSchemaMode = EvidenceSchemaMode.LOOSE
     max_retries_per_step: int = 2
     retry_exhausted_action: str = "PAUSE_FOR_HUMAN"
+    enable_shell_gates: bool = False
+    shell_gate_allowlist: list[str] = Field(default_factory=list)
 
 
 class StepSpec(BaseModel):

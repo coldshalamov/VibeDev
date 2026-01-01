@@ -33,7 +33,7 @@ For the most detailed, prioritized work plan, see `docs/NEXT_STEPS_PROMPT.md`.
 ### “Big Rocks” (Backend)
 
 - [ ] Automatic checkpoint step insertion (policy-driven)
-- [ ] Process templates (save/load job structures)
+- [ ] Process templates (save/load job structures) *(partial: built-in `template_list`/`template_apply` exists; persistence still TBD)*
 - [ ] RepoMap dependency graph
 - [ ] Smarter evidence validation (less “hand-wavy” proofs)
 - [ ] Step dependencies (DAG execution + visualization)

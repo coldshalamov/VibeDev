@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibedev_mcp.conductor import compute_next_questions
 from vibedev_mcp.store import VibeDevStore
+from vibedev_mcp.templates import get_template, list_templates
 
 
 def _default_db_path() -> Path:
@@ -56,6 +57,9 @@ DEFAULT_POLICIES: dict[str, Any] = {
     "evidence_schema_mode": "loose",
     "max_retries_per_step": 2,
     "retry_exhausted_action": "PAUSE_FOR_HUMAN",
+    # Safety: shell-executing gates are opt-in and allowlisted per job.
+    "enable_shell_gates": False,
+    "shell_gate_allowlist": [],
 }
 
 
@@ -1005,14 +1009,83 @@ class GitLogInput(BaseModel):
     },
 )
 async def git_log(params: GitLogInput, ctx: Context) -> dict[str, Any]:
-    """Get recent git commits (oneline format) for the job's repository."""
+    """Get recent git commits (oneline format) for the job's repository."""     
     store = ctx.request_context.lifespan_context.store
     return await store.git_log(job_id=params.job_id, n=params.n)
 
 
-# =============================================================================
+# ============================================================================= 
+# Templates Tools
+# ============================================================================= 
+
+
+@mcp.tool(
+    name="template_list",
+    annotations={
+        "title": "List built-in workflow templates",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def template_list(ctx: Context) -> dict[str, Any]:
+    templates = list_templates()
+    return {"count": len(templates), "templates": templates}
+
+
+class TemplateApplyInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    template_id: str = Field(..., min_length=1)
+    overwrite_planning_artifacts: bool = False
+    overwrite_steps: bool = True
+
+
+@mcp.tool(
+    name="template_apply",
+    annotations={
+        "title": "Apply a built-in workflow template to a job (planning mode)",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def template_apply(params: TemplateApplyInput, ctx: Context) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    template = get_template(params.template_id)
+
+    await store.job_update_policies(
+        job_id=params.job_id,
+        update=template.get("recommended_policies") or {},
+        merge=True,
+    )
+
+    job = await store.get_job(params.job_id)
+
+    if params.overwrite_planning_artifacts or not job.get("deliverables"):
+        await store.plan_set_deliverables(params.job_id, template.get("deliverables") or [])
+    if params.overwrite_planning_artifacts or job.get("invariants") is None:
+        await store.plan_set_invariants(params.job_id, template.get("invariants") or [])
+    if params.overwrite_planning_artifacts or not job.get("definition_of_done"):
+        await store.plan_set_definition_of_done(
+            params.job_id, template.get("definition_of_done") or []
+        )
+
+    steps_out: list[dict[str, Any]] = []
+    if params.overwrite_steps:
+        await store.plan_propose_steps(params.job_id, template.get("steps") or [])
+        steps_out = await store.get_steps(params.job_id)
+
+    job = await store.get_job(params.job_id)
+    return {"ok": True, "job": job, "steps": steps_out}
+
+
+# ============================================================================= 
 # Repo Hygiene Tools
-# =============================================================================
+# ============================================================================= 
 
 
 class RepoHygieneSuggestInput(BaseModel):

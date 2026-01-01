@@ -30,3 +30,5 @@ async def test_mcp_server_registers_core_tools():
     assert "repo_find_stale_candidates" in names
     assert "job_export_bundle" in names
     assert "job_archive" in names
+    assert "template_list" in names
+    assert "template_apply" in names

@@ -11,6 +11,7 @@ import {
   useSetInvariants,
   useSetDefinitionOfDone,
   useProposeSteps,
+  useApplyTemplate,
   useSetJobReady,
 } from '@/hooks/useUIState';
 import { cn } from '@/lib/utils';
@@ -224,6 +225,7 @@ function StepCreationSection({ jobId }: { jobId: string }) {
   >([{ title: '', instruction_prompt: '', acceptance_criteria: '', required_evidence: '' }]);
 
   const proposeStepsMutation = useProposeSteps(jobId);
+  const applyTemplateMutation = useApplyTemplate(jobId);
 
   const addStep = () => {
     setSteps([
@@ -240,6 +242,10 @@ function StepCreationSection({ jobId }: { jobId: string }) {
 
   const removeStep = (index: number) => {
     setSteps(steps.filter((_, i) => i !== index));
+  };
+
+  const applyStrictTemplate = async () => {
+    await applyTemplateMutation.mutateAsync({ templateId: 'strict_feature' });
   };
 
   const handleSubmit = async () => {
@@ -265,6 +271,14 @@ function StepCreationSection({ jobId }: { jobId: string }) {
     <div className="panel">
       <div className="panel-header">
         <h3 className="panel-title">Define Execution Steps</h3>
+        <button
+          onClick={applyStrictTemplate}
+          disabled={applyTemplateMutation.isPending}
+          className="btn btn-outline"
+          title="Apply an opinionated best-practice step chain"
+        >
+          {applyTemplateMutation.isPending ? 'Applying...' : 'Apply Strict Template'}
+        </button>
         <button onClick={addStep} className="btn btn-outline btn-icon" title="Add step">
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

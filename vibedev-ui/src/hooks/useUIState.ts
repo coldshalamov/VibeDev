@@ -244,6 +244,29 @@ export function useRefineSteps(jobId: string) {
       }>
     ) => api.refineSteps(jobId, edits),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });    
+    },
+  });
+}
+
+export function useApplyTemplate(jobId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      templateId,
+      overwritePlanningArtifacts,
+      overwriteSteps,
+    }: {
+      templateId: string;
+      overwritePlanningArtifacts?: boolean;
+      overwriteSteps?: boolean;
+    }) =>
+      api.applyTemplate(jobId, templateId, {
+        overwrite_planning_artifacts: overwritePlanningArtifacts,
+        overwrite_steps: overwriteSteps,
+      }),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
     },
   });

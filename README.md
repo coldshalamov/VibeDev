@@ -52,6 +52,23 @@ Prereqs: Python 3.11+
 - Memory: `context_*`, `mistake_*`, `devlog_*`
 - Repo helpers: `repo_snapshot`, `repo_map_export`, `repo_find_stale_candidates`, `repo_hygiene_suggest`, `git_*`
 
+## Workflow templates (best-practice defaults)
+
+VibeDev includes built-in workflow templates you can apply during planning to get a
+strong default step chain (small diffs, evidence, gates).
+
+- HTTP: `GET /api/templates`
+- HTTP apply: `POST /api/jobs/{job_id}/templates/{template_id}/apply`
+- MCP tools: `template_list`, `template_apply`
+
+### Safety note: shell-executing command gates
+
+Some templates include command-executing gates (e.g. run tests/build). For safety, these
+are enforced as **opt-in** and **allowlisted** per job:
+
+- `policies.enable_shell_gates` (default: `false`)
+- `policies.shell_gate_allowlist` (default: `[]`)
+
 ## Contributing
 
 - Run tests: `python -m pytest -v`

@@ -10,6 +10,12 @@ import type {
   PlanningQuestion,
 } from '@/types';
 
+export type TemplateSummary = {
+  template_id: string;
+  title: string;
+  description: string;
+};
+
 const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL ?? '';
 const API_PREFIX = (import.meta as any).env?.VITE_API_PREFIX ?? '/api';
 const API_BASE = `${API_BASE_URL}${API_PREFIX}`;
@@ -69,6 +75,31 @@ export async function createJob(
 
 export async function archiveJob(jobId: string): Promise<{ ok: boolean }> {
   return request(`/jobs/${jobId}/archive`, { method: 'POST' });
+}
+
+// =============================================================================
+// Templates
+// =============================================================================
+
+export async function listTemplates(): Promise<{
+  count: number;
+  templates: TemplateSummary[];
+}> {
+  return request(`/templates`);
+}
+
+export async function applyTemplate(
+  jobId: string,
+  templateId: string,
+  opts?: { overwrite_planning_artifacts?: boolean; overwrite_steps?: boolean }
+): Promise<{ ok: boolean; job: unknown; steps: unknown[] }> {
+  return request(`/jobs/${jobId}/templates/${templateId}/apply`, {
+    method: 'POST',
+    body: JSON.stringify({
+      overwrite_planning_artifacts: opts?.overwrite_planning_artifacts ?? false,
+      overwrite_steps: opts?.overwrite_steps ?? true,
+    }),
+  });
 }
 
 // =============================================================================

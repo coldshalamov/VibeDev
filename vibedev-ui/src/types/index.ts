@@ -26,6 +26,8 @@ export interface Policies {
   evidence_schema_mode?: 'loose' | 'strict';
   max_retries_per_step?: number;
   retry_exhausted_action?: 'PAUSE_FOR_HUMAN' | 'FAIL_JOB';
+  enable_shell_gates?: boolean;
+  shell_gate_allowlist?: string[];
 }
 
 export interface Job {
