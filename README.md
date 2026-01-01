@@ -56,3 +56,13 @@ Prereqs: Python 3.11+
 
 - Run tests: `python -m pytest -v`
 - Keep diffs small and evidence-driven (see `CLAUDE.md`).
+
+---
+
+## Compilation Surface
+
+| Section | Maps To | Field/Policy |
+|---------|---------|--------------|
+| Docs links | Informational | (Navigation only) |
+| Install/quick start | Informational | (How to run locally) |
+| Tool surface | Informational | (Public tool/API entrypoints) |

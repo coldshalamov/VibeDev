@@ -427,3 +427,12 @@ The system is complete when:
 - Process templates are a nice-to-have, not critical for v1
 
 Good luck! This is a substantial but achievable roadmap. Focus on Priority 1 and 2 first - once the GUI talks to the backend, everything else is incremental improvement.
+
+---
+
+## Compilation Surface
+
+| Section | Maps To | Field/Policy |
+|---------|---------|--------------|
+| This document | Informational | (Backlog prompt; not compiler input) |
+

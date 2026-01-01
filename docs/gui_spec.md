@@ -131,3 +131,12 @@ When an AI agent is tasked with building this GUI, it should follow this phased 
 5. **Phase 5: Global Context Views**: Add the Sidebar for Invariants, Mistakes, and Repo Mapping.
 
 This GUI transforms VibeDev from a "background process" into an **Interactive IDE Extension** that treats the LLM as a powerful engine and the user as the expert pilot.
+
+---
+
+## Compilation Surface
+
+| Section | Maps To | Field/Policy |
+|---------|---------|--------------|
+| This document | Informational | (Legacy UI ideas; not compiler input) |
+

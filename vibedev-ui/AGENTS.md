@@ -21,3 +21,13 @@
 
 - SSE endpoint: `GET /api/jobs/{job_id}/events`
 - Hook: `vibedev-ui/src/hooks/useJobEvents.ts`
+
+---
+
+## Compilation Surface
+
+| Section | Maps To | Field/Policy |
+|---------|---------|--------------|
+| Local development | Informational | (How to run the UI) |
+| Backend connectivity | Informational | (Proxy + API base configuration) |
+| Live updates (SSE) | Informational | (UI refresh/invalidation strategy) |
