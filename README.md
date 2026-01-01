@@ -1,64 +1,58 @@
 # VibeDev
-VibeDev MCP: a persistent “development process brain” that enforces disciplined LLM coding workflows.
 
-It’s designed to:
-- Separate **Planning** (messy, research-heavy) from **Execution** (clean, step-by-step).
-- Store a “compiled prompt chain” as a `job_id` you can paste into a new thread.
-- Gate progress using required **evidence fields** so the model can’t hand-wave.
+VibeDev MCP is a **prompt compiler + verifier**: it turns planning artifacts into deterministic **StepTemplates** with **Gates**, then executes them with **EvidenceSchema**-based gating (and optional autoprompt runner actions).
 
-The core spec lives in `docs/spec.md`.
-The GUI spec lives in `docs/gui_spec.md`.
+Why it exists:
+- LLMs reliably fail via premature implementation, scope creep, and hand-wavy “done”.
+- VibeDev makes those failures expensive by requiring explicit steps, explicit gates, and verifiable evidence.
+
+## Docs (start here)
+
+- `docs/00_overview.md` — what/why + behavioral contract
+- `docs/02_step_canvas_spec.md` — StepTemplate schema + examples
+- `docs/03_gates_and_evidence.md` — gate catalog + evidence schema
+- `docs/05_studio_ui_spec.md` — the GUI (“Studio”) spec
+- `docs/07_doc_map.md` — where every concept lives
+
+For LLM usage rules in this repo, read `CLAUDE.md`.
 
 ## Install (local)
-Run:
+
+Prereqs: Python 3.11+
+
 - `python -m pip install -e .`
+- (dev) `python -m pip install -e .[dev]`
 
-Optional dev deps:
-- `python -m pip install -e .[dev]`
+## Quick start
 
-## Run
-Default transport is `stdio`:
+### 1) Run as an MCP server (stdio)
+
 - `vibedev-mcp`
 
-HTTP API (for `vibedev-ui`):
+### 2) Run the HTTP API (REST + SSE, for the GUI)
+
 - `vibedev-mcp serve` (defaults to `127.0.0.1:8765`)
 
-By default, the SQLite DB is stored at:
-- `%USERPROFILE%\.vibedev\vibedev.sqlite3`
+### 3) Run the GUI (local)
 
-Override DB path:
-- `set VIBEDEV_DB_PATH=C:\path\to\vibedev.sqlite3`
-- `vibedev-mcp`
-
-## Run the GUI (local)
 - Terminal 1: `vibedev-mcp serve`
-- Terminal 2: `cd vibedev-ui` then `npm run dev` (Vite runs on `http://localhost:3000` and proxies `/api` to the backend)
+- Terminal 2: `cd vibedev-ui` then `npm install` then `npm run dev` (Vite runs on `http://localhost:3000` and proxies `/api` to `http://localhost:8765`)
 
-## Core tools
-Planning / memory:
-- `conductor_init`, `conductor_next_questions`, `conductor_answer`
-- `context_add_block`, `context_get_block`, `context_search`
-- `plan_set_deliverables`, `plan_set_invariants`, `plan_set_definition_of_done`, `plan_propose_steps`, `job_set_ready`
+## Configuration
 
-Execution / gating:
-- `job_start`, `job_next_step_prompt`, `job_submit_step_result`
+- Default DB path: `%USERPROFILE%\.vibedev\vibedev.sqlite3`
+- Override DB path: `set VIBEDEV_DB_PATH=C:\path\to\vibedev.sqlite3`
+- Override HTTP port: `set VIBEDEV_HTTP_PORT=8765`
 
-Logging / artifacts:
-- `devlog_append`, `mistake_record`, `mistake_list`
-- `repo_snapshot`, `repo_file_descriptions_update`, `repo_map_export`, `repo_find_stale_candidates`
-- `job_export_bundle`, `job_archive`
+## Tool surface (high level)
 
-## Planning phases (roadmap)
-`conductor_next_questions` runs a phased planning interview (Phase 1–5) aligned with `VibeDev.txt`:
-1. Intent & scope (repo exists, out-of-scope, environment, timeline)
-2. Deliverables (and definition of done)
-3. Invariants (non-negotiables)
-4. Repo context (repo root; optional repo map)
-5. Plan compilation (step list)
+- Planning: `conductor_init`, `conductor_next_questions`, `conductor_answer`, `plan_*`, `job_set_ready`
+- Execution: `job_start`, `job_next_step_prompt`, `job_submit_step_result`
+- UI: `get_ui_state` (and `/api/jobs/{job_id}/ui-state` via HTTP)
+- Memory: `context_*`, `mistake_*`, `devlog_*`
+- Repo helpers: `repo_snapshot`, `repo_map_export`, `repo_find_stale_candidates`, `repo_hygiene_suggest`, `git_*`
 
-## Evidence gating
-`job_next_step_prompt` emits a structured step prompt with an evidence template.
-Gating can be tightened via policies (set at `conductor_init.policies`):
-- `require_tests_evidence`: require `tests_run` + `tests_passed`
-- `require_diff_summary`: require `diff_summary`
-- `evidence_schema_mode: "strict"`: require per-criterion `criteria_checklist` and reject if any criterion is false
+## Contributing
+
+- Run tests: `python -m pytest -v`
+- Keep diffs small and evidence-driven (see `CLAUDE.md`).

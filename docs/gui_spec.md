@@ -1,5 +1,15 @@
 # VibeDev GUI: The "Glass Box" Development Command Center
 
+> **Status:** Legacy / exploratory design notes.
+>
+> The canonical Studio UI spec is now `docs/05_studio_ui_spec.md` (and the “where is it?” index is `docs/07_doc_map.md`).
+>
+> Notes on current implementation:
+> - The repo includes an HTTP API layer (REST + SSE) intended for the GUI.
+> - The repo includes a Vite/React frontend in `vibedev-ui/`.
+>
+> This document is kept for additional ideas and historical context; it may describe features or deployment approaches that are not (yet) implemented.
+
 ## 1. Architectural Philosophy: The Stateful Supervisor UI
 
 The VibeDev GUI is not a simple chat window; it is a **visual state machine representation**. While standard AI interfaces are ephemeral (context disappears), this GUI makes the **Job Object**  a living, editable "Canvas." It serves three primary functions:

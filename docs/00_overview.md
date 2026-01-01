@@ -112,6 +112,10 @@ Passing without evidence is treated as a **system failure**.
 
 ---
 
+## Doc Map
+
+For the canonical “where is the answer?” index, see: [07_doc_map.md](07_doc_map.md).
+
 ## Two-Thread Workflow (Overview)
 
 VibeDev enforces cognitive separation between planning and execution.

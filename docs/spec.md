@@ -1,4 +1,18 @@
-﻿Document 1 — Concept + User Workflow (Planner → Clean Executor)
+﻿# Legacy Spec (Historical)
+
+> **Status:** Legacy / historical spec notes (pre-refactor).
+>
+> The canonical, “compiler-ready” specification now lives in:
+> - `docs/00_overview.md` through `docs/07_doc_map.md`
+>
+> This file is preserved for background, rationale, and additional ideas. It may:
+> - Use older terminology (e.g., “VibeOps MCP”) that should now be read as “VibeDev MCP”
+> - Describe features that were later redesigned or implemented differently
+>
+> If something in this file contradicts the structured docs set, treat the structured docs as canonical and log a TODO to reconcile.
+
+---
+Document 1 — Concept + User Workflow (Planner → Clean Executor)
 Name (working): 
 VibeDev
  — a persistent “development process brain” for LLM coding

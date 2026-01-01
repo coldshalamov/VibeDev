@@ -1,5 +1,13 @@
 # VibeDev MCP - Next Development Phase Prompt
 
+> **Status update (repo reality check):** As of 2026-01-01, this repo already includes:
+> - A FastAPI HTTP layer with REST endpoints + SSE events (`vibedev_mcp/http_server.py`)
+> - A CLI entry for HTTP serving via `vibedev-mcp serve`
+> - A React/Vite frontend wired to the `/api` endpoints (see `vibedev-ui/src/lib/api.ts`)
+> - An SSE hook for live updates (`vibedev-ui/src/hooks/useJobEvents.ts`)
+>
+> This document is preserved as a roadmap prompt; sections below may describe work that is already implemented. Treat “Priority 3+” as the real remaining backlog unless otherwise noted.
+
 ## Context
 
 You are continuing development on **VibeDev MCP**, a persistent development process brain that enforces disciplined LLM coding workflows. The project separates Planning (messy, research-heavy) from Execution (clean, step-by-step) and uses evidence-based progress gating.
@@ -17,13 +25,15 @@ You are continuing development on **VibeDev MCP**, a persistent development proc
 - Components: GlobalSidebar, MainCanvas, ExecutionDashboard, AutomationCockpit, JobSelector
 - Zustand store + React Query hooks configured
 - Tailwind CSS with shadcn-style theming
-- API client written but **NOT YET CONNECTED** to a real backend
+- API client wired to the real backend endpoints; validate the full workflow end-to-end
 
 ---
 
-## Priority 1: Backend HTTP/SSE Transport Layer
+## Priority 1 (DONE): Backend HTTP/SSE Transport Layer
 
-The MCP server currently only supports stdio transport. The GUI needs HTTP endpoints.
+The MCP server originally only supported stdio transport. The GUI needs HTTP endpoints.
+
+**Implementation note:** This repo now includes `vibedev_mcp/http_server.py`, including REST endpoints under `/api/*` and an SSE stream at `GET /api/jobs/{job_id}/events`.
 
 ### Tasks
 
@@ -100,7 +110,7 @@ The MCP server currently only supports stdio transport. The GUI needs HTTP endpo
 
 ---
 
-## Priority 2: Connect Frontend to Backend
+## Priority 2 (MOSTLY DONE): Connect Frontend to Backend
 
 ### Tasks
 
