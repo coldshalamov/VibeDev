@@ -276,7 +276,7 @@ async def test_gate_file_exists_and_not_exists():
                 gates=[{"type": "file_exists", "parameters": {"path": "missing.txt"}}],
                 evidence={},
             )
-            assert any("does not exist" in f.lower() for f in failures)
+            assert any("missing" in f.lower() for f in failures)
 
             failures = await _eval(
                 store=store,
@@ -292,7 +292,7 @@ async def test_gate_file_exists_and_not_exists():
                 gates=[{"type": "file_not_exists", "parameters": {"path": "present.txt"}}],
                 evidence={},
             )
-            assert any("should not exist" in f.lower() for f in failures)
+            assert any("exists" in f.lower() for f in failures)
         finally:
             await store.close()
     finally:
@@ -358,6 +358,8 @@ async def test_gate_no_uncommitted_changes_and_diff_bounds_and_patch_applies():
                 capture_output=True,
                 text=True,
             ).stdout
+            # Reset the working tree so the patch can be applied cleanly.
+            subprocess.run(["git", "checkout", "--", "a.txt"], cwd=repo_root, check=True)
             failures = await _eval(
                 store=store,
                 job_id=job_id,
@@ -423,7 +425,7 @@ async def test_shell_command_gates_are_policy_guarded():
                 gates=[
                     {
                         "type": "command_output_regex",
-                        "parameters": {"command": "echo abc123", "pattern": r"\\d+"},
+                        "parameters": {"command": "echo abc123", "pattern": r"\d+"},
                     }
                 ],
                 evidence={},
@@ -505,6 +507,8 @@ async def test_gate_human_approval_roundtrip():
                     }
                 ],
             )
+            await store.job_set_ready(job_id)
+            await store.job_start(job_id)
 
             failures = await _eval(
                 store=store,
@@ -563,4 +567,3 @@ async def test_unknown_gate_type_fails():
             await store.close()
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-

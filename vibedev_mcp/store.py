@@ -39,8 +39,41 @@ def _normalize_relpath(path: str) -> str:
 
 
 def _matches_any_glob(path: str, patterns: list[str]) -> bool:
-    p = PurePosixPath(_normalize_relpath(path))
-    return any(p.match(pattern) for pattern in patterns)
+    """
+    Match a normalized POSIX-ish path against a list of glob patterns.
+
+    Note: `pathlib.PurePath.match()` has surprising semantics for patterns like
+    `src/**` (it won't match deeper descendants). VibeDev gate allowlists are
+    intended to behave like "recursive globs", so we implement a small glob
+    matcher that treats `**` as "match across path separators".
+    """
+
+    normalized = _normalize_relpath(path)
+
+    def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+        pat = _normalize_relpath(pattern)
+        out: list[str] = ["^"]
+        i = 0
+        while i < len(pat):
+            ch = pat[i]
+            if ch == "*":
+                if i + 1 < len(pat) and pat[i + 1] == "*":
+                    out.append(".*")
+                    i += 2
+                    continue
+                out.append("[^/]*")
+                i += 1
+                continue
+            if ch == "?":
+                out.append("[^/]")
+                i += 1
+                continue
+            out.append(re.escape(ch))
+            i += 1
+        out.append("$")
+        return re.compile("".join(out))
+
+    return any(_glob_to_regex(pattern).match(normalized) for pattern in patterns)
 
 
 class VibeDevStore:
