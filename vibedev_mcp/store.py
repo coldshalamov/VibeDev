@@ -1,6 +1,16 @@
+"""VibeDev persistent storage layer.
+
+This module provides the VibeDevStore class which handles all database
+operations for jobs, steps, attempts, context blocks, logs, mistakes,
+and repository snapshots.
+"""
+
+from __future__ import annotations
+
 import json
 import secrets
 import string
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -149,6 +159,7 @@ class VibeDevStore:
                 ("step_order_json", "TEXT"),
                 ("current_step_index", "INTEGER DEFAULT 0"),
                 ("planning_answers_json", "TEXT"),
+                ("failure_reason", "TEXT"),
             ]
         )
         await self._ensure_steps_columns(
@@ -863,4 +874,626 @@ class VibeDevStore:
             "next_action": next_action,
             "missing_fields": missing_fields,
             "rejection_reasons": rejection_reasons,
+        }
+
+    # =========================================================================
+    # UI State Methods
+    # =========================================================================
+
+    async def get_steps(self, job_id: str) -> list[dict[str, Any]]:
+        """Get all steps for a job."""
+        async with self._conn.execute(
+            "SELECT * FROM steps WHERE job_id = ? ORDER BY order_index ASC;",
+            (job_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        steps: list[dict[str, Any]] = []
+        for row in rows:
+            step = dict(row)
+            step["acceptance_criteria"] = json.loads(step.pop("acceptance_criteria_json") or "[]")
+            step["required_evidence"] = json.loads(step.pop("required_evidence_json") or "[]")
+            expected_outputs_json = step.pop("expected_outputs_json", None)
+            step["expected_outputs"] = json.loads(expected_outputs_json or "[]") if expected_outputs_json else []
+            step["context_refs"] = json.loads(step.pop("context_refs_json") or "[]")
+            steps.append(step)
+        return steps
+
+    async def get_attempts(self, job_id: str, step_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        """Get attempts for a job, optionally filtered by step."""
+        if step_id:
+            async with self._conn.execute(
+                """
+                SELECT * FROM attempts
+                WHERE job_id = ? AND step_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?;
+                """,
+                (job_id, step_id, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        else:
+            async with self._conn.execute(
+                """
+                SELECT * FROM attempts
+                WHERE job_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?;
+                """,
+                (job_id, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+        attempts: list[dict[str, Any]] = []
+        for row in rows:
+            attempt = dict(row)
+            attempt["evidence"] = json.loads(attempt.pop("evidence_json") or "{}")
+            attempt["rejection_reasons"] = json.loads(attempt.pop("rejection_reasons_json") or "[]")
+            attempt["missing_fields"] = json.loads(attempt.pop("missing_fields_json") or "[]")
+            attempts.append(attempt)
+        return attempts
+
+    async def get_ui_state(self, job_id: str) -> dict[str, Any]:
+        """
+        Get complete UI state for a job.
+
+        This is the primary endpoint for the GUI, bundling all relevant
+        state into a single response optimized for rendering.
+        """
+        from vibedev_mcp.conductor import get_phase_summary  
+
+        job = await self.get_job(job_id)
+        steps = await self.get_steps(job_id)
+        mistakes = await self.mistake_list(job_id=job_id, limit=10)
+        recent_logs = await self.devlog_list(job_id=job_id, limit=20)
+
+        # Get phase info
+        phase_summary = get_phase_summary(job)
+
+        # Attempt counts per step (for UI badges/progress)
+        async with self._conn.execute(
+            """
+            SELECT step_id, COUNT(1) AS n
+            FROM attempts
+            WHERE job_id = ?
+            GROUP BY step_id;
+            """,
+            (job_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        attempt_counts = {r["step_id"]: int(r["n"]) for r in rows}
+
+        # Get current step details if executing
+        current_step = None
+        current_step_attempts: list[dict[str, Any]] = []
+        if job["status"] == "EXECUTING" and job.get("step_order"):
+            idx = job.get("current_step_index", 0)
+            if idx < len(job["step_order"]):
+                current_step_id = job["step_order"][idx]
+                for s in steps:
+                    if s["step_id"] == current_step_id:
+                        current_step = s
+                        break
+                current_step_attempts = await self.get_attempts(job_id, current_step_id, limit=5)
+
+        # Get repo map if available
+        repo_map = await self.repo_map_export(job_id=job_id, format="json")
+
+        # Get git status if repo exists
+        git_state = None
+        if job.get("repo_root"):
+            try:
+                git_state = await self.git_status(job_id=job_id)
+            except Exception:
+                git_state = {"ok": False, "error": "Could not get git status"}
+
+        # Compute step statuses
+        step_statuses = []
+        current_idx = job.get("current_step_index", 0)
+        for i, step in enumerate(steps):
+            if job["status"] == "COMPLETE":
+                status = "DONE"
+            elif job["status"] != "EXECUTING":
+                status = "PENDING"
+            elif i < current_idx:
+                status = "DONE"
+            elif i == current_idx:
+                status = "ACTIVE"
+            else:
+                status = "PENDING"
+            step_statuses.append({
+                **step,
+                "status": status,
+                "attempt_count": attempt_counts.get(step["step_id"], 0),
+            })
+
+        if job["status"] == "EXECUTING" and job.get("step_order"):
+            idx = int(job.get("current_step_index") or 0)
+            if 0 <= idx < len(job["step_order"]):
+                current_step_id = job["step_order"][idx]
+                for s in step_statuses:
+                    if s["step_id"] == current_step_id:
+                        current_step = s
+                        break
+
+        # Context health indicators
+        context_blocks = await self.context_search(job_id=job_id, query="", limit=100)
+
+        return {
+            "job": {
+                "job_id": job["job_id"],
+                "title": job["title"],
+                "goal": job["goal"],
+                "status": job["status"],
+                "created_at": job["created_at"],
+                "updated_at": job["updated_at"],
+                "repo_root": job.get("repo_root"),
+                "policies": job.get("policies", {}),
+                "deliverables": job.get("deliverables", []),
+                "invariants": job.get("invariants") or [],
+                "definition_of_done": job.get("definition_of_done", []),        
+                "current_step_index": job.get("current_step_index", 0),
+                "total_steps": len(steps),
+                "failure_reason": job.get("failure_reason"),
+            },
+            "phase": phase_summary,
+            "steps": step_statuses,
+            "current_step": current_step,
+            "current_step_attempts": current_step_attempts,
+            "mistakes": mistakes,
+            "recent_logs": recent_logs,
+            "repo_map": repo_map.get("entries", []),
+            "git_status": git_state,
+            "context_block_count": len(context_blocks),
+            "planning_answers": job.get("planning_answers", {}),
+        }
+
+    # =========================================================================
+    # Job Lifecycle Methods
+    # =========================================================================
+
+    async def job_pause(self, job_id: str) -> dict[str, Any]:
+        """Pause an executing job."""
+        job = await self.get_job(job_id)
+        if job["status"] != "EXECUTING":
+            raise ValueError(f"Job {job_id} is not EXECUTING (status={job['status']})")
+
+        await self._conn.execute(
+            "UPDATE jobs SET status = 'PAUSED', updated_at = ? WHERE job_id = ?;",
+            (_utc_now_iso(), job_id),
+        )
+        await self._conn.commit()
+        return {"ok": True, "job_id": job_id, "status": "PAUSED"}
+
+    async def job_resume(self, job_id: str) -> dict[str, Any]:
+        """Resume a paused job."""
+        job = await self.get_job(job_id)
+        if job["status"] != "PAUSED":
+            raise ValueError(f"Job {job_id} is not PAUSED (status={job['status']})")
+
+        await self._conn.execute(
+            "UPDATE jobs SET status = 'EXECUTING', updated_at = ? WHERE job_id = ?;",
+            (_utc_now_iso(), job_id),
+        )
+        await self._conn.commit()
+        return {"ok": True, "job_id": job_id, "status": "EXECUTING"}
+
+    async def job_fail(self, job_id: str, reason: str) -> dict[str, Any]:
+        """Mark a job as failed with a reason."""
+        job = await self.get_job(job_id)
+        if job["status"] in {"COMPLETE", "ARCHIVED", "FAILED"}:
+            raise ValueError(f"Job {job_id} cannot be failed (status={job['status']})")
+
+        await self._conn.execute(
+            "UPDATE jobs SET status = 'FAILED', failure_reason = ?, updated_at = ? WHERE job_id = ?;",
+            (reason, _utc_now_iso(), job_id),
+        )
+        await self._conn.commit()
+
+        # Record the failure as a mistake entry
+        await self.mistake_record(
+            job_id=job_id,
+            title="Job Failed",
+            what_happened=reason,
+            why="Job marked as failed",
+            lesson="Review failure reason before retrying",
+            avoid_next_time="Address root cause",
+            tags=["job_failure"],
+            related_step_id=None,
+        )
+
+        return {"ok": True, "job_id": job_id, "status": "FAILED", "reason": reason}
+
+    async def job_list(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List jobs with optional status filter."""
+        if status:
+            async with self._conn.execute(
+                """
+                SELECT job_id, title, goal, status, created_at, updated_at,
+                       step_order_json, current_step_index
+                FROM jobs
+                WHERE status = ?
+                ORDER BY updated_at DESC
+                LIMIT ? OFFSET ?;
+                """,
+                (status, limit, offset),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        else:
+            async with self._conn.execute(
+                """
+                SELECT job_id, title, goal, status, created_at, updated_at,
+                       step_order_json, current_step_index
+                FROM jobs
+                ORDER BY updated_at DESC
+                LIMIT ? OFFSET ?;
+                """,
+                (limit, offset),
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            step_order = json.loads(row["step_order_json"] or "[]")
+            items.append({
+                "job_id": row["job_id"],
+                "title": row["title"],
+                "goal": row["goal"],
+                "status": row["status"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "step_count": len(step_order),
+                "current_step_index": row["current_step_index"] or 0,
+            })
+
+        return {"count": len(items), "items": items}
+
+    # =========================================================================
+    # Plan Refinement
+    # =========================================================================
+
+    async def plan_refine_steps(
+        self,
+        job_id: str,
+        edits: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """
+        Apply edits to existing steps without full replacement.
+
+        Each edit is a dict with:
+        - step_id: which step to edit
+        - action: "update", "insert_before", "insert_after", "delete"
+        - data: step data for update/insert actions
+        """
+        job = await self.get_job(job_id)
+        if job["status"] not in {"PLANNING", "READY"}:
+            raise ValueError(f"Job {job_id} cannot be refined (status={job['status']})")
+
+        # Fetch current steps
+        async with self._conn.execute(
+            "SELECT * FROM steps WHERE job_id = ? ORDER BY order_index ASC;",
+            (job_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        steps: list[dict[str, Any]] = []
+        for row in rows:
+            step = dict(row)
+            step["acceptance_criteria"] = json.loads(step.pop("acceptance_criteria_json") or "[]")
+            step["required_evidence"] = json.loads(step.pop("required_evidence_json") or "[]")
+            expected_outputs_json = step.pop("expected_outputs_json", None)
+            step["expected_outputs"] = json.loads(expected_outputs_json or "[]") if expected_outputs_json else []
+            step["context_refs"] = json.loads(step.pop("context_refs_json") or "[]")
+            steps.append(step)
+
+        step_map = {s["step_id"]: i for i, s in enumerate(steps)}
+
+        for edit in edits:
+            action = edit.get("action", "update")
+            step_id = edit.get("step_id")
+            data = edit.get("data", {})
+
+            if action == "update":
+                if step_id not in step_map:
+                    raise KeyError(f"Unknown step_id: {step_id}")
+                idx = step_map[step_id]
+                for key, value in data.items():
+                    if key in steps[idx]:
+                        steps[idx][key] = value
+            elif action == "delete":
+                if step_id not in step_map:
+                    raise KeyError(f"Unknown step_id: {step_id}")
+                idx = step_map[step_id]
+                steps.pop(idx)
+                step_map = {s["step_id"]: i for i, s in enumerate(steps)}
+            elif action == "insert_after":
+                if step_id not in step_map:
+                    raise KeyError(f"Unknown step_id: {step_id}")
+                idx = step_map[step_id]
+                new_step = self._normalize_step_data(data, len(steps) + 1)
+                steps.insert(idx + 1, new_step)
+                step_map = {s["step_id"]: i for i, s in enumerate(steps)}
+            elif action == "insert_before":
+                if step_id not in step_map:
+                    raise KeyError(f"Unknown step_id: {step_id}")
+                idx = step_map[step_id]
+                new_step = self._normalize_step_data(data, len(steps) + 1)
+                steps.insert(idx, new_step)
+                step_map = {s["step_id"]: i for i, s in enumerate(steps)}
+
+        # Re-save all steps
+        normalized = await self.plan_propose_steps(
+            job_id,
+            [
+                {
+                    "step_id": s.get("step_id"),
+                    "title": s["title"],
+                    "instruction_prompt": s["instruction_prompt"],
+                    "acceptance_criteria": s.get("acceptance_criteria", []),
+                    "required_evidence": s.get("required_evidence", []),
+                    "expected_outputs": s.get("expected_outputs", []),
+                    "remediation_prompt": s.get("remediation_prompt", ""),
+                    "context_refs": s.get("context_refs", []),
+                }
+                for s in steps
+            ],
+        )
+        return normalized
+
+    def _normalize_step_data(self, data: dict[str, Any], default_index: int) -> dict[str, Any]:
+        """Normalize step data with defaults."""
+        return {
+            "step_id": data.get("step_id") or f"S{default_index}",
+            "title": data.get("title", "Untitled Step"),
+            "instruction_prompt": data.get("instruction_prompt", ""),
+            "acceptance_criteria": data.get("acceptance_criteria", []),
+            "required_evidence": data.get("required_evidence", []),
+            "expected_outputs": data.get("expected_outputs", []),
+            "remediation_prompt": data.get("remediation_prompt", ""),
+            "context_refs": data.get("context_refs", []),
+        }
+
+    # =========================================================================
+    # Devlog Operations
+    # =========================================================================
+
+    async def devlog_list(
+        self,
+        *,
+        job_id: str,
+        log_type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List devlog entries for a job."""
+        if log_type:
+            async with self._conn.execute(
+                """
+                SELECT log_id, log_type, content, created_at, step_id, commit_hash
+                FROM logs
+                WHERE job_id = ? AND log_type = ?
+                ORDER BY created_at DESC
+                LIMIT ?;
+                """,
+                (job_id, log_type, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        else:
+            async with self._conn.execute(
+                """
+                SELECT log_id, log_type, content, created_at, step_id, commit_hash
+                FROM logs
+                WHERE job_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?;
+                """,
+                (job_id, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+        return [dict(row) for row in rows]
+
+    async def devlog_export(
+        self,
+        *,
+        job_id: str,
+        format: str = "md",
+    ) -> dict[str, Any]:
+        """Export devlog entries for a job."""
+        logs = await self.devlog_list(job_id=job_id, limit=1000)
+        logs.reverse()  # Chronological order
+
+        if format == "json":
+            return {"format": "json", "entries": logs}
+
+        job = await self.get_job(job_id)
+        lines = [
+            f"# Dev Log: {job.get('title', '(untitled)')} ({job_id})",
+            "",
+        ]
+        for log in logs:
+            step_info = f" [{log['step_id']}]" if log.get("step_id") else ""
+            commit_info = f" ({log['commit_hash'][:8]})" if log.get("commit_hash") else ""
+            lines.append(f"- **{log['created_at']}**{step_info}{commit_info}: {log['content']}")
+
+        return {"format": "md", "content": "\n".join(lines)}
+
+    # =========================================================================
+    # Git Integration
+    # =========================================================================
+
+    async def git_status(self, *, job_id: str) -> dict[str, Any]:
+        """Get git status for a job's repo."""
+        job = await self.get_job(job_id)
+        repo_root = job.get("repo_root")
+        if not repo_root:
+            raise ValueError(f"Job {job_id} has no repo_root set")
+
+        try:
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                return {"ok": False, "error": result.stderr}
+
+            lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
+            modified = [l[3:] for l in lines if l.startswith(" M")]
+            added = [l[3:] for l in lines if l.startswith("A ") or l.startswith("??")]
+            deleted = [l[3:] for l in lines if l.startswith(" D")]
+
+            return {
+                "ok": True,
+                "clean": len(lines) == 0,
+                "modified": modified,
+                "added": added,
+                "deleted": deleted,
+                "raw": result.stdout,
+            }
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "git status timed out"}
+        except FileNotFoundError:
+            return {"ok": False, "error": "git not found"}
+
+    async def git_diff_summary(self, *, job_id: str, staged: bool = False) -> dict[str, Any]:
+        """Get git diff summary for a job's repo."""
+        job = await self.get_job(job_id)
+        repo_root = job.get("repo_root")
+        if not repo_root:
+            raise ValueError(f"Job {job_id} has no repo_root set")
+
+        try:
+            cmd = ["git", "diff", "--stat"]
+            if staged:
+                cmd.append("--staged")
+
+            result = subprocess.run(
+                cmd,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                return {"ok": False, "error": result.stderr}
+
+            return {
+                "ok": True,
+                "staged": staged,
+                "summary": result.stdout,
+            }
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "git diff timed out"}
+        except FileNotFoundError:
+            return {"ok": False, "error": "git not found"}
+
+    async def git_log(
+        self,
+        *,
+        job_id: str,
+        n: int = 10,
+    ) -> dict[str, Any]:
+        """Get recent git commits for a job's repo."""
+        job = await self.get_job(job_id)
+        repo_root = job.get("repo_root")
+        if not repo_root:
+            raise ValueError(f"Job {job_id} has no repo_root set")
+
+        try:
+            result = subprocess.run(
+                ["git", "log", f"-{n}", "--oneline"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                return {"ok": False, "error": result.stderr}
+
+            commits = []
+            for line in result.stdout.strip().split("\n"):
+                if line:
+                    parts = line.split(" ", 1)
+                    commits.append({
+                        "hash": parts[0],
+                        "message": parts[1] if len(parts) > 1 else "",
+                    })
+
+            return {"ok": True, "commits": commits}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "git log timed out"}
+        except FileNotFoundError:
+            return {"ok": False, "error": "git not found"}
+
+    # =========================================================================
+    # Repo Hygiene
+    # =========================================================================
+
+    async def repo_hygiene_suggest(
+        self,
+        *,
+        job_id: str,
+        max_suggestions: int = 20,
+    ) -> dict[str, Any]:
+        """
+        Suggest repo hygiene improvements.
+
+        Returns suggestions for:
+        - Stale/backup files
+        - Files without descriptions in repo map
+        - Large files
+        - Files not in any import graph (if detectable)
+        """
+        job = await self.get_job(job_id)
+        repo_root = job.get("repo_root")
+        if not repo_root:
+            raise ValueError(f"Job {job_id} has no repo_root set")
+
+        suggestions: list[dict[str, str]] = []
+
+        # Get stale candidates
+        stale = find_stale_candidates(repo_root, max_results=max_suggestions // 2)
+        for item in stale:
+            suggestions.append({
+                "type": "stale_file",
+                "path": item["path"],
+                "suggestion": f"Consider removing: {item['reason']}",
+            })
+
+        # Get files without descriptions
+        async with self._conn.execute(
+            "SELECT path FROM repo_map_entries WHERE job_id = ?;",
+            (job_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        described_paths = {row["path"] for row in rows}
+
+        # Find undescribed files from latest snapshot
+        async with self._conn.execute(
+            "SELECT key_files_json FROM repo_snapshots WHERE job_id = ? ORDER BY timestamp DESC LIMIT 1;",
+            (job_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if row:
+            key_files = json.loads(row["key_files_json"] or "[]")
+            undescribed = [f for f in key_files if f not in described_paths][:max_suggestions // 2]
+            for path in undescribed:
+                suggestions.append({
+                    "type": "undescribed_file",
+                    "path": path,
+                    "suggestion": "Add description to repo map",
+                })
+
+        return {
+            "count": len(suggestions),
+            "suggestions": suggestions[:max_suggestions],
         }

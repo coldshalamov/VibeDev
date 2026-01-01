@@ -1,0 +1,285 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   VibeDev Custom Styles
+   ============================================================================= */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+
+    /* VibeDev Status Colors */
+    --status-planning: 45 93% 47%;
+    --status-ready: 142 76% 36%;
+    --status-executing: 221 83% 53%;
+    --status-paused: 38 92% 50%;
+    --status-complete: 142 71% 45%;
+    --status-failed: 0 84% 60%;
+    --status-archived: 220 9% 46%;
+
+    /* Step Status Colors */
+    --step-pending: 220 9% 46%;
+    --step-active: 221 83% 53%;
+    --step-passed: 142 71% 45%;
+    --step-failed: 0 84% 60%;
+    --step-skipped: 38 92% 50%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* =============================================================================
+   Component Styles
+   ============================================================================= */
+
+@layer components {
+  /* Glass morphism effect */
+  .glass {
+    @apply bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg;
+  }
+
+  /* Status badges */
+  .badge-planning {
+    @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300;
+  }
+  .badge-ready {
+    @apply bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300;
+  }
+  .badge-executing {
+    @apply bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300;
+  }
+  .badge-paused {
+    @apply bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300;
+  }
+  .badge-complete {
+    @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300;
+  }
+  .badge-failed {
+    @apply bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300;
+  }
+  .badge-archived {
+    @apply bg-gray-100 text-gray-800 dark:bg-gray-700/30 dark:text-gray-300;
+  }
+
+  /* Step cards */
+  .step-card {
+    @apply rounded-lg border p-4 transition-all duration-200;
+  }
+  .step-card-pending {
+    @apply border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50;
+  }
+  .step-card-active {
+    @apply border-blue-300 bg-blue-50 ring-2 ring-blue-200 dark:border-blue-600 dark:bg-blue-900/30 dark:ring-blue-800;
+  }
+  .step-card-done,
+  .step-card-passed {
+    @apply border-green-300 bg-green-50 dark:border-green-600 dark:bg-green-900/30;
+  }
+  .step-card-failed {
+    @apply border-red-300 bg-red-50 dark:border-red-600 dark:bg-red-900/30;
+  }
+
+  /* Panel styles */
+  .panel {
+    @apply rounded-xl border bg-card p-4 shadow-sm;
+  }
+  .panel-header {
+    @apply mb-4 flex items-center justify-between border-b pb-2;
+  }
+  .panel-title {
+    @apply text-sm font-semibold uppercase tracking-wider text-muted-foreground;
+  }
+
+  /* Sidebar styles */
+  .sidebar {
+    @apply flex h-full flex-col border-r bg-card;
+  }
+  .sidebar-section {
+    @apply border-b p-4;
+  }
+  .sidebar-section:last-child {
+    @apply border-b-0;
+  }
+
+  /* Button variants */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90;
+  }
+  .btn-secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80;
+  }
+  .btn-destructive {
+    @apply bg-destructive text-destructive-foreground hover:bg-destructive/90;
+  }
+  .btn-outline {
+    @apply border border-input bg-background hover:bg-accent hover:text-accent-foreground;
+  }
+  .btn-ghost {
+    @apply hover:bg-accent hover:text-accent-foreground;
+  }
+  .btn-icon {
+    @apply h-9 w-9 p-0;
+  }
+
+  /* Code/evidence blocks */
+  .code-block {
+    @apply rounded-md bg-gray-900 p-4 font-mono text-sm text-gray-100;
+  }
+  .evidence-block {
+    @apply rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 dark:border-gray-600 dark:bg-gray-800/50;
+  }
+
+  /* Animated pulse for active items */
+  .pulse-active {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+}
+
+/* =============================================================================
+   Animations
+   ============================================================================= */
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(59, 130, 246, 0);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.3s ease-out;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* =============================================================================
+   Scrollbar Styles
+   ============================================================================= */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-gray-300 dark:bg-gray-600;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400 dark:bg-gray-500;
+}
+
+/* =============================================================================
+   Utility Classes
+   ============================================================================= */
+
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.truncate-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

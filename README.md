@@ -6,7 +6,8 @@ It’s designed to:
 - Store a “compiled prompt chain” as a `job_id` you can paste into a new thread.
 - Gate progress using required **evidence fields** so the model can’t hand-wave.
 
-The core spec lives in `VibeDev.txt`.
+The core spec lives in `docs/spec.md`.
+The GUI spec lives in `docs/gui_spec.md`.
 
 ## Install (local)
 Run:
@@ -19,12 +20,19 @@ Optional dev deps:
 Default transport is `stdio`:
 - `vibedev-mcp`
 
+HTTP API (for `vibedev-ui`):
+- `vibedev-mcp serve` (defaults to `127.0.0.1:8765`)
+
 By default, the SQLite DB is stored at:
 - `%USERPROFILE%\.vibedev\vibedev.sqlite3`
 
 Override DB path:
 - `set VIBEDEV_DB_PATH=C:\path\to\vibedev.sqlite3`
 - `vibedev-mcp`
+
+## Run the GUI (local)
+- Terminal 1: `vibedev-mcp serve`
+- Terminal 2: `cd vibedev-ui` then `npm run dev` (Vite runs on `http://localhost:3000` and proxies `/api` to the backend)
 
 ## Core tools
 Planning / memory:

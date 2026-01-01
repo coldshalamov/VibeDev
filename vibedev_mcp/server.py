@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -666,7 +667,333 @@ async def job_next_step_prompt(params: JobIdInput, ctx: Context) -> dict[str, An
     return await store.job_next_step_prompt(params.job_id)
 
 
+# =============================================================================
+# UI State Tools
+# =============================================================================
+
+
+@mcp.tool(
+    name="get_ui_state",
+    annotations={
+        "title": "Get complete UI state for a job",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def get_ui_state(params: JobIdInput, ctx: Context) -> dict[str, Any]:
+    """
+    Get complete UI state for rendering the VibeDev GUI.
+
+    Returns a comprehensive bundle including:
+    - Job metadata and status
+    - Phase progress
+    - All steps with status indicators
+    - Current step details (if executing)
+    - Recent mistakes and logs
+    - Repo map and git status
+    - Planning answers
+    """
+    store = ctx.request_context.lifespan_context.store
+    return await store.get_ui_state(params.job_id)
+
+
+# =============================================================================
+# Job Lifecycle Tools
+# =============================================================================
+
+
+@mcp.tool(
+    name="job_pause",
+    annotations={
+        "title": "Pause an executing job",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def job_pause(params: JobIdInput, ctx: Context) -> dict[str, Any]:
+    """Pause a job that is currently executing. Can be resumed later."""
+    store = ctx.request_context.lifespan_context.store
+    return await store.job_pause(params.job_id)
+
+
+@mcp.tool(
+    name="job_resume",
+    annotations={
+        "title": "Resume a paused job",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def job_resume(params: JobIdInput, ctx: Context) -> dict[str, Any]:
+    """Resume a paused job to continue execution."""
+    store = ctx.request_context.lifespan_context.store
+    return await store.job_resume(params.job_id)
+
+
+class JobFailInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    reason: str = Field(..., min_length=1, description="Reason for failure")
+
+
+@mcp.tool(
+    name="job_fail",
+    annotations={
+        "title": "Mark a job as failed",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def job_fail(params: JobFailInput, ctx: Context) -> dict[str, Any]:
+    """Mark a job as failed with a reason. This also records a mistake entry."""
+    store = ctx.request_context.lifespan_context.store
+    return await store.job_fail(params.job_id, params.reason)
+
+
+class JobListInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    status: str | None = Field(
+        default=None,
+        description="Filter by status (PLANNING, READY, EXECUTING, PAUSED, COMPLETE, FAILED, ARCHIVED)",
+    )
+    limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+
+
+@mcp.tool(
+    name="job_list",
+    annotations={
+        "title": "List all jobs with optional status filter",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def job_list(params: JobListInput, ctx: Context) -> dict[str, Any]:
+    """List jobs with optional status filter, pagination support."""
+    store = ctx.request_context.lifespan_context.store
+    return await store.job_list(status=params.status, limit=params.limit, offset=params.offset)
+
+
+# =============================================================================
+# Plan Refinement Tools
+# =============================================================================
+
+
+class StepEditSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    step_id: str = Field(..., min_length=1, description="Step ID to operate on")
+    action: str = Field(
+        default="update",
+        description="Action: update, insert_before, insert_after, delete",
+    )
+    data: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Step data for update/insert (title, instruction_prompt, etc.)",
+    )
+
+
+class PlanRefineStepsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    edits: list[StepEditSpec] = Field(..., min_length=1)
+
+
+@mcp.tool(
+    name="plan_refine_steps",
+    annotations={
+        "title": "Apply edits to existing steps without full replacement",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def plan_refine_steps(params: PlanRefineStepsInput, ctx: Context) -> dict[str, Any]:
+    """
+    Edit steps without replacing the entire list.
+
+    Supports actions: update, insert_before, insert_after, delete.
+    """
+    store = ctx.request_context.lifespan_context.store
+    edits = [e.model_dump() for e in params.edits]
+    normalized = await store.plan_refine_steps(params.job_id, edits)
+    return {"ok": True, "steps": normalized}
+
+
+# =============================================================================
+# Devlog Tools
+# =============================================================================
+
+
+class DevlogListInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    log_type: str | None = Field(default=None, description="Filter by log type (DEVLOG, DECISION, etc.)")
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+@mcp.tool(
+    name="devlog_list",
+    annotations={
+        "title": "List devlog entries for a job",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def devlog_list(params: DevlogListInput, ctx: Context) -> dict[str, Any]:
+    """List devlog entries with optional type filter."""
+    store = ctx.request_context.lifespan_context.store
+    entries = await store.devlog_list(job_id=params.job_id, log_type=params.log_type, limit=params.limit)
+    return {"count": len(entries), "entries": entries}
+
+
+class DevlogExportInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    format: str = Field(default="md", description="Export format: md or json")
+
+
+@mcp.tool(
+    name="devlog_export",
+    annotations={
+        "title": "Export devlog as markdown or JSON",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def devlog_export(params: DevlogExportInput, ctx: Context) -> dict[str, Any]:
+    """Export all devlog entries for a job."""
+    store = ctx.request_context.lifespan_context.store
+    return await store.devlog_export(job_id=params.job_id, format=params.format)
+
+
+# =============================================================================
+# Git Integration Tools
+# =============================================================================
+
+
+@mcp.tool(
+    name="git_status",
+    annotations={
+        "title": "Get git status for job's repository",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def git_status(params: JobIdInput, ctx: Context) -> dict[str, Any]:
+    """Get git working tree status for the job's repository."""
+    store = ctx.request_context.lifespan_context.store
+    return await store.git_status(job_id=params.job_id)
+
+
+class GitDiffSummaryInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    staged: bool = Field(default=False, description="Show staged changes only")
+
+
+@mcp.tool(
+    name="git_diff_summary",
+    annotations={
+        "title": "Get git diff summary for job's repository",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def git_diff_summary(params: GitDiffSummaryInput, ctx: Context) -> dict[str, Any]:
+    """Get git diff --stat summary for the job's repository."""
+    store = ctx.request_context.lifespan_context.store
+    return await store.git_diff_summary(job_id=params.job_id, staged=params.staged)
+
+
+class GitLogInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    n: int = Field(default=10, ge=1, le=100, description="Number of commits to show")
+
+
+@mcp.tool(
+    name="git_log",
+    annotations={
+        "title": "Get recent git commits for job's repository",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def git_log(params: GitLogInput, ctx: Context) -> dict[str, Any]:
+    """Get recent git commits (oneline format) for the job's repository."""
+    store = ctx.request_context.lifespan_context.store
+    return await store.git_log(job_id=params.job_id, n=params.n)
+
+
+# =============================================================================
+# Repo Hygiene Tools
+# =============================================================================
+
+
+class RepoHygieneSuggestInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    max_suggestions: int = Field(default=20, ge=1, le=100)
+
+
+@mcp.tool(
+    name="repo_hygiene_suggest",
+    annotations={
+        "title": "Suggest repo hygiene improvements",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def repo_hygiene_suggest(params: RepoHygieneSuggestInput, ctx: Context) -> dict[str, Any]:
+    """
+    Analyze the repository and suggest hygiene improvements.
+
+    Returns suggestions for stale files, undescribed files, etc.
+    """
+    store = ctx.request_context.lifespan_context.store
+    return await store.repo_hygiene_suggest(job_id=params.job_id, max_suggestions=params.max_suggestions)
+
+
 def main() -> None:
+    argv = sys.argv[1:]
+    if argv and argv[0] == "serve":
+        from vibedev_mcp.http_server import serve_main
+
+        serve_main(argv[1:])
+        return
+
     mcp.run()
 
 
