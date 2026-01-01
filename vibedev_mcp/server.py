@@ -439,6 +439,56 @@ async def job_submit_step_result(params: SubmitStepResultInput, ctx: Context) ->
     )
 
 
+class ApproveStepInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    step_id: str = Field(..., min_length=1)
+
+
+@mcp.tool(
+    name="approve_step",
+    annotations={
+        "title": "Grant human approval for a step (for human_approval gates)",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def approve_step(params: ApproveStepInput, ctx: Context) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    return await store.approve_step(
+        job_id=params.job_id,
+        step_id=params.step_id,
+    )
+
+
+class RevokeStepApprovalInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    step_id: str = Field(..., min_length=1)
+
+
+@mcp.tool(
+    name="revoke_step_approval",
+    annotations={
+        "title": "Revoke human approval for a step",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def revoke_step_approval(params: RevokeStepApprovalInput, ctx: Context) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    return await store.revoke_step_approval(
+        job_id=params.job_id,
+        step_id=params.step_id,
+    )
+
+
 class DevlogAppendInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

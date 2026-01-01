@@ -7,7 +7,9 @@ and repository snapshots.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 import secrets
 import string
 import subprocess
@@ -176,6 +178,7 @@ class VibeDevStore:
             [
                 ("expected_outputs_json", "TEXT"),
                 ("gates_json", "TEXT"),
+                ("human_approved", "INTEGER DEFAULT 0"),
             ]
         )
         await self._conn.commit()
@@ -891,6 +894,239 @@ class VibeDevStore:
                         "Gate patch_applies_cleanly failed: could not validate patch."
                     )
 
+            elif gate_type == "command_exit_0":
+                # Run a shell command and check that exit code is 0
+                command = params.get("command")
+                if not isinstance(command, str) or not command.strip():
+                    failures.append(
+                        "Gate command_exit_0 misconfigured: parameters.command must be a non-empty string."
+                    )
+                    continue
+
+                timeout_secs = params.get("timeout", 60)
+                if not isinstance(timeout_secs, (int, float)) or timeout_secs <= 0:
+                    timeout_secs = 60
+                timeout_secs = min(timeout_secs, 300)  # Max 5 minutes
+
+                cwd = job.get("repo_root") or None
+                try:
+                    result = subprocess.run(
+                        command,
+                        shell=True,
+                        cwd=cwd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout_secs,
+                    )
+                    if result.returncode != 0:
+                        stderr_snippet = (result.stderr or "")[:500]
+                        failures.append(
+                            f"Gate command_exit_0 failed: command returned exit code {result.returncode}. "
+                            f"stderr: {stderr_snippet}"
+                        )
+                except subprocess.TimeoutExpired:
+                    failures.append(
+                        f"Gate command_exit_0 failed: command timed out after {timeout_secs}s."
+                    )
+                except Exception as e:
+                    failures.append(f"Gate command_exit_0 failed: {e}")
+
+            elif gate_type == "command_output_contains":
+                # Run a shell command and check that output contains a substring
+                command = params.get("command")
+                contains = params.get("contains")
+                if not isinstance(command, str) or not command.strip():
+                    failures.append(
+                        "Gate command_output_contains misconfigured: parameters.command must be a non-empty string."
+                    )
+                    continue
+                if not isinstance(contains, str):
+                    failures.append(
+                        "Gate command_output_contains misconfigured: parameters.contains must be a string."
+                    )
+                    continue
+
+                timeout_secs = params.get("timeout", 60)
+                if not isinstance(timeout_secs, (int, float)) or timeout_secs <= 0:
+                    timeout_secs = 60
+                timeout_secs = min(timeout_secs, 300)
+
+                case_insensitive = params.get("case_insensitive", False)
+                cwd = job.get("repo_root") or None
+                try:
+                    result = subprocess.run(
+                        command,
+                        shell=True,
+                        cwd=cwd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout_secs,
+                    )
+                    combined_output = (result.stdout or "") + (result.stderr or "")
+                    if case_insensitive:
+                        found = contains.lower() in combined_output.lower()
+                    else:
+                        found = contains in combined_output
+                    if not found:
+                        failures.append(
+                            f"Gate command_output_contains failed: output does not contain {contains!r}."
+                        )
+                except subprocess.TimeoutExpired:
+                    failures.append(
+                        f"Gate command_output_contains failed: command timed out after {timeout_secs}s."
+                    )
+                except Exception as e:
+                    failures.append(f"Gate command_output_contains failed: {e}")
+
+            elif gate_type == "command_output_regex":
+                # Run a shell command and check that output matches a regex pattern
+                command = params.get("command")
+                pattern = params.get("pattern")
+                if not isinstance(command, str) or not command.strip():
+                    failures.append(
+                        "Gate command_output_regex misconfigured: parameters.command must be a non-empty string."
+                    )
+                    continue
+                if not isinstance(pattern, str):
+                    failures.append(
+                        "Gate command_output_regex misconfigured: parameters.pattern must be a string."
+                    )
+                    continue
+
+                try:
+                    compiled_pattern = re.compile(pattern)
+                except re.error as e:
+                    failures.append(
+                        f"Gate command_output_regex misconfigured: invalid regex pattern: {e}"
+                    )
+                    continue
+
+                timeout_secs = params.get("timeout", 60)
+                if not isinstance(timeout_secs, (int, float)) or timeout_secs <= 0:
+                    timeout_secs = 60
+                timeout_secs = min(timeout_secs, 300)
+
+                cwd = job.get("repo_root") or None
+                try:
+                    result = subprocess.run(
+                        command,
+                        shell=True,
+                        cwd=cwd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout_secs,
+                    )
+                    combined_output = (result.stdout or "") + (result.stderr or "")
+                    if not compiled_pattern.search(combined_output):
+                        failures.append(
+                            f"Gate command_output_regex failed: output does not match pattern {pattern!r}."
+                        )
+                except subprocess.TimeoutExpired:
+                    failures.append(
+                        f"Gate command_output_regex failed: command timed out after {timeout_secs}s."
+                    )
+                except Exception as e:
+                    failures.append(f"Gate command_output_regex failed: {e}")
+
+            elif gate_type == "json_schema_valid":
+                # Validate a JSON file against a schema
+                if not job.get("repo_root"):
+                    failures.append("Gate json_schema_valid failed: job.repo_root is not set.")
+                    continue
+
+                file_path = params.get("path")
+                schema = params.get("schema")
+                if not isinstance(file_path, str) or not file_path.strip():
+                    failures.append(
+                        "Gate json_schema_valid misconfigured: parameters.path must be a non-empty string."
+                    )
+                    continue
+                if not isinstance(schema, dict):
+                    failures.append(
+                        "Gate json_schema_valid misconfigured: parameters.schema must be a JSON schema object."
+                    )
+                    continue
+
+                repo_root_path = Path(job["repo_root"]).resolve()
+                target = (repo_root_path / file_path).resolve()
+                try:
+                    target.relative_to(repo_root_path)
+                except ValueError:
+                    failures.append(
+                        f"Gate json_schema_valid misconfigured: path must be within repo_root (got {file_path!r})."
+                    )
+                    continue
+
+                if not target.exists():
+                    failures.append(f"Gate json_schema_valid failed: file {file_path!r} does not exist.")
+                    continue
+
+                try:
+                    with open(target, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except json.JSONDecodeError as e:
+                    failures.append(f"Gate json_schema_valid failed: invalid JSON in {file_path!r}: {e}")
+                    continue
+                except Exception as e:
+                    failures.append(f"Gate json_schema_valid failed: could not read {file_path!r}: {e}")
+                    continue
+
+                # Simple schema validation (type checking for common cases)
+                # For full JSON Schema validation, would need jsonschema library
+                schema_type = schema.get("type")
+                if schema_type:
+                    type_map = {
+                        "object": dict,
+                        "array": list,
+                        "string": str,
+                        "number": (int, float),
+                        "integer": int,
+                        "boolean": bool,
+                        "null": type(None),
+                    }
+                    expected_type = type_map.get(schema_type)
+                    if expected_type and not isinstance(data, expected_type):
+                        failures.append(
+                            f"Gate json_schema_valid failed: expected {schema_type}, got {type(data).__name__}."
+                        )
+                        continue
+
+                # Check required properties for objects
+                if schema_type == "object" and isinstance(data, dict):
+                    required = schema.get("required", [])
+                    if isinstance(required, list):
+                        missing = [k for k in required if k not in data]
+                        if missing:
+                            failures.append(
+                                f"Gate json_schema_valid failed: missing required properties: {', '.join(missing)}."
+                            )
+
+            elif gate_type == "human_approval":
+                # Check if human has explicitly approved this step
+                # This gate always fails during automated evaluation
+                # It requires explicit approval via approve_step() call
+                description = params.get("description", "Human approval required")
+
+                # Check if there's an approval record for this step
+                # The approval is stored as a flag on the step itself
+                step_id = step.get("step_id")
+                if step_id:
+                    cursor = await self._conn.execute(
+                        "SELECT human_approved FROM steps WHERE job_id = ? AND step_id = ?;",
+                        (job_id, step_id),
+                    )
+                    row = await cursor.fetchone()
+                    if row and row[0]:
+                        # Human has approved
+                        pass
+                    else:
+                        failures.append(
+                            f"Gate human_approval failed: {description}. "
+                            "Use approve_step() to grant approval."
+                        )
+                else:
+                    failures.append("Gate human_approval failed: could not determine step_id.")
+
             else:
                 failures.append(f"Unknown gate type: {gate_type!r}.")     
 
@@ -1296,6 +1532,43 @@ class VibeDevStore:
             step["gates"] = json.loads(gates_json or "[]") if gates_json else []
             steps.append(step)
         return steps
+
+    async def approve_step(self, job_id: str, step_id: str) -> dict[str, Any]:
+        """Grant human approval for a step (for human_approval gates)."""
+        # Verify job and step exist
+        job = await self.get_job(job_id)
+        if job["status"] not in {"EXECUTING", "PAUSED"}:
+            raise ValueError(f"Job {job_id} is not in EXECUTING/PAUSED state (status={job['status']})")
+
+        step = await self._get_step(job_id, step_id)
+        if not step:
+            raise ValueError(f"Step {step_id} not found in job {job_id}")
+
+        # Set human_approved flag
+        await self._conn.execute(
+            "UPDATE steps SET human_approved = 1 WHERE job_id = ? AND step_id = ?;",
+            (job_id, step_id),
+        )
+        await self._conn.commit()
+
+        return {"ok": True, "job_id": job_id, "step_id": step_id, "human_approved": True}
+
+    async def revoke_step_approval(self, job_id: str, step_id: str) -> dict[str, Any]:
+        """Revoke human approval for a step."""
+        # Verify job and step exist
+        await self.get_job(job_id)
+        step = await self._get_step(job_id, step_id)
+        if not step:
+            raise ValueError(f"Step {step_id} not found in job {job_id}")
+
+        # Clear human_approved flag
+        await self._conn.execute(
+            "UPDATE steps SET human_approved = 0 WHERE job_id = ? AND step_id = ?;",
+            (job_id, step_id),
+        )
+        await self._conn.commit()
+
+        return {"ok": True, "job_id": job_id, "step_id": step_id, "human_approved": False}
 
     async def get_attempts(self, job_id: str, step_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         """Get attempts for a job, optionally filtered by step."""

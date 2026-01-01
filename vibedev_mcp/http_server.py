@@ -297,6 +297,18 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
             commit_hash=payload.commit_hash,
         )
 
+    @app.post("/api/jobs/{job_id}/steps/{step_id}/approve")
+    async def approve_step(job_id: str, step_id: str, request: Request) -> dict[str, Any]:
+        """Grant human approval for a step (for human_approval gates)."""
+        store = store_from(request)
+        return await store.approve_step(job_id=job_id, step_id=step_id)
+
+    @app.delete("/api/jobs/{job_id}/steps/{step_id}/approve")
+    async def revoke_step_approval(job_id: str, step_id: str, request: Request) -> dict[str, Any]:
+        """Revoke human approval for a step."""
+        store = store_from(request)
+        return await store.revoke_step_approval(job_id=job_id, step_id=step_id)
+
     # -------------------------------------------------------------------------
     # Context
     # -------------------------------------------------------------------------
