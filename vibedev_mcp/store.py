@@ -13,6 +13,7 @@ import string
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 
 import aiosqlite
@@ -28,6 +29,15 @@ def _new_id(prefix: str, length: int = 4) -> str:
     alphabet = string.ascii_uppercase + string.digits
     suffix = "".join(secrets.choice(alphabet) for _ in range(length))
     return f"{prefix}-{suffix}"
+
+
+def _normalize_relpath(path: str) -> str:
+    return path.replace("\\", "/").lstrip("./")
+
+
+def _matches_any_glob(path: str, patterns: list[str]) -> bool:
+    p = PurePosixPath(_normalize_relpath(path))
+    return any(p.match(pattern) for pattern in patterns)
 
 
 class VibeDevStore:
@@ -165,6 +175,7 @@ class VibeDevStore:
         await self._ensure_steps_columns(
             [
                 ("expected_outputs_json", "TEXT"),
+                ("gates_json", "TEXT"),
             ]
         )
         await self._conn.commit()
@@ -479,6 +490,8 @@ class VibeDevStore:
             expected_outputs_json = step.pop("expected_outputs_json", None)
             step["expected_outputs"] = json.loads(expected_outputs_json or "[]") if expected_outputs_json else []
             step["context_refs"] = json.loads(step.pop("context_refs_json") or "[]")
+            gates_json = step.pop("gates_json", None)
+            step["gates"] = json.loads(gates_json or "[]") if gates_json else []
             steps.append(step)
 
         if format == "md":
@@ -550,20 +563,22 @@ class VibeDevStore:
                 "title": step["title"],
                 "instruction_prompt": step["instruction_prompt"],
                 "acceptance_criteria": step.get("acceptance_criteria", []),
-                "required_evidence": step.get("required_evidence", []),
-                "expected_outputs": step.get("expected_outputs", []),
-                "remediation_prompt": step.get("remediation_prompt", ""),
+                "required_evidence": step.get("required_evidence", []),    
+                "expected_outputs": step.get("expected_outputs", []),      
+                "remediation_prompt": step.get("remediation_prompt", ""),  
                 "context_refs": step.get("context_refs", []),
+                "gates": step.get("gates", []),
             }
             normalized.append(normalized_step)
 
             await self._conn.execute(
                 """
                 INSERT INTO steps (
-                  job_id, step_id, order_index, title, instruction_prompt,
-                  acceptance_criteria_json, required_evidence_json,
-                  expected_outputs_json, remediation_prompt, context_refs_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                  job_id, step_id, order_index, title, instruction_prompt, 
+                  acceptance_criteria_json, required_evidence_json,        
+                  expected_outputs_json, remediation_prompt, context_refs_json,
+                  gates_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     job_id,
@@ -571,11 +586,12 @@ class VibeDevStore:
                     idx - 1,
                     normalized_step["title"],
                     normalized_step["instruction_prompt"],
-                    json.dumps(normalized_step["acceptance_criteria"]),
-                    json.dumps(normalized_step["required_evidence"]),
-                    json.dumps(normalized_step["expected_outputs"]),
+                    json.dumps(normalized_step["acceptance_criteria"]),    
+                    json.dumps(normalized_step["required_evidence"]),      
+                    json.dumps(normalized_step["expected_outputs"]),       
                     normalized_step["remediation_prompt"],
                     json.dumps(normalized_step["context_refs"]),
+                    json.dumps(normalized_step["gates"]),
                 ),
             )
 
@@ -603,10 +619,282 @@ class VibeDevStore:
         data = dict(row)
         data["acceptance_criteria"] = json.loads(data.pop("acceptance_criteria_json") or "[]")
         data["required_evidence"] = json.loads(data.pop("required_evidence_json") or "[]")
-        expected_outputs_json = data.pop("expected_outputs_json", None)
+        expected_outputs_json = data.pop("expected_outputs_json", None)    
         data["expected_outputs"] = json.loads(expected_outputs_json or "[]") if expected_outputs_json else []
         data["context_refs"] = json.loads(data.pop("context_refs_json") or "[]")
+        gates_json = data.pop("gates_json", None)
+        data["gates"] = json.loads(gates_json or "[]") if gates_json else []
         return data
+
+    async def _count_rejected_attempts(self, *, job_id: str, step_id: str) -> int:
+        async with self._conn.execute(
+            """
+            SELECT COUNT(1) AS n
+            FROM attempts
+            WHERE job_id = ? AND step_id = ? AND outcome = 'rejected';
+            """,
+            (job_id, step_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return int(row["n"] if row else 0)
+
+    async def _evaluate_step_gates(
+        self,
+        *,
+        job_id: str,
+        step: dict[str, Any],
+        evidence: dict[str, Any],
+    ) -> list[str]:
+        gates = step.get("gates") or []
+        if not gates:
+            return []
+        if not isinstance(gates, list):
+            return ["Gate evaluation failed: step.gates is not a list."]
+
+        job = await self.get_job(job_id)
+        git_status = None
+        changed_files_from_git: list[str] | None = None
+        if job.get("repo_root"):
+            try:
+                git_status = await self.git_status(job_id=job_id)
+                if git_status.get("ok"):
+                    changed_files_from_git = [
+                        *git_status.get("modified", []),
+                        *git_status.get("added", []),
+                        *git_status.get("deleted", []),
+                    ]
+            except Exception:
+                git_status = None
+                changed_files_from_git = None
+
+        failures: list[str] = []
+        for gate in gates:
+            if not isinstance(gate, dict):
+                failures.append("Gate evaluation failed: invalid gate entry (must be an object).")
+                continue
+
+            gate_type = gate.get("type")
+            params = gate.get("parameters") or {}
+
+            if gate_type == "tests_passed":
+                if evidence.get("tests_passed") is not True:
+                    failures.append("Gate tests_passed failed: evidence.tests_passed is not true.")
+                if "tests_run" not in evidence:
+                    failures.append("Gate tests_passed failed: missing evidence.tests_run.")
+
+            elif gate_type == "lint_passed":
+                if evidence.get("lint_passed") is not True:
+                    failures.append("Gate lint_passed failed: evidence.lint_passed is not true.")
+
+            elif gate_type == "criteria_checklist_complete":
+                raw = evidence.get("criteria_checklist")
+                if not isinstance(raw, dict):
+                    failures.append("Gate criteria_checklist_complete failed: evidence.criteria_checklist missing.")
+                else:
+                    expected = step.get("acceptance_criteria") or []
+                    expected_keys = [f"c{i}" for i in range(1, len(expected) + 1)]
+                    missing = [k for k in expected_keys if k not in raw]
+                    if missing:
+                        failures.append(
+                            "Gate criteria_checklist_complete failed: missing checklist keys "
+                            + ", ".join(missing)
+                            + "."
+                        )
+                    else:
+                        # Require all criteria (and any extra keys) to be true.
+                        for _, v in raw.items():
+                            if v is not True:
+                                failures.append(
+                                    "Gate criteria_checklist_complete failed: one or more criteria are false."
+                                )
+                                break
+
+            elif gate_type in {"changed_files_allowlist", "forbid_paths"}:
+                patterns = params.get("allowed") if gate_type == "changed_files_allowlist" else params.get("paths")
+                if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
+                    failures.append(
+                        f"Gate {gate_type} misconfigured: parameters must include a list of glob patterns."
+                    )
+                    continue
+
+                changed = changed_files_from_git
+                if changed is None:
+                    raw = evidence.get("changed_files")
+                    if not isinstance(raw, list) or not all(isinstance(p, str) for p in raw):
+                        failures.append(
+                            f"Gate {gate_type} failed: evidence.changed_files must be a list of paths."
+                        )
+                        continue
+                    changed = raw
+
+                if gate_type == "changed_files_allowlist":
+                    offenders = [p for p in changed if not _matches_any_glob(p, patterns)]
+                    if offenders:
+                        failures.append(
+                            f"Gate changed_files_allowlist failed (allowlist): files outside allowlist: {', '.join(offenders)}"
+                        )
+                else:
+                    offenders = [p for p in changed if _matches_any_glob(p, patterns)]
+                    if offenders:
+                        failures.append(
+                            f"Gate forbid_paths failed: forbidden paths touched: {', '.join(offenders)}"
+                        )
+
+            elif gate_type == "changed_files_minimum":
+                patterns = params.get("paths")
+                min_count = params.get("min_count", 1)
+                if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
+                    failures.append(
+                        "Gate changed_files_minimum misconfigured: parameters.paths must be a list of glob patterns."
+                    )
+                    continue
+                if not isinstance(min_count, int) or min_count < 0:
+                    failures.append(
+                        "Gate changed_files_minimum misconfigured: parameters.min_count must be a non-negative int."
+                    )
+                    continue
+
+                changed = changed_files_from_git
+                if changed is None:
+                    raw = evidence.get("changed_files")
+                    if not isinstance(raw, list) or not all(isinstance(p, str) for p in raw):
+                        failures.append(
+                            "Gate changed_files_minimum failed: evidence.changed_files must be a list of paths."
+                        )
+                        continue
+                    changed = raw
+
+                matched = 0
+                for pat in patterns:
+                    if any(_matches_any_glob(p, [pat]) for p in changed):
+                        matched += 1
+                if matched < min_count:
+                    failures.append(
+                        f"Gate changed_files_minimum failed: matched {matched} paths, need at least {min_count}."
+                    )
+
+            elif gate_type in {"file_exists", "file_not_exists"}:
+                if not job.get("repo_root"):
+                    failures.append(f"Gate {gate_type} failed: job.repo_root is not set.")
+                    continue
+
+                rel = params.get("path")
+                if not isinstance(rel, str) or not rel.strip():
+                    failures.append(f"Gate {gate_type} misconfigured: parameters.path must be a non-empty string.")
+                    continue
+
+                repo_root_path = Path(job["repo_root"]).resolve()
+                target = (repo_root_path / rel).resolve()
+                try:
+                    target.relative_to(repo_root_path)
+                except ValueError:
+                    failures.append(
+                        f"Gate {gate_type} misconfigured: path must be within repo_root (got {rel!r})."
+                    )
+                    continue
+
+                exists = target.exists()
+                if gate_type == "file_exists" and not exists:
+                    failures.append(f"Gate file_exists failed: missing {rel!r}.")
+                if gate_type == "file_not_exists" and exists:
+                    failures.append(f"Gate file_not_exists failed: {rel!r} exists.")
+
+            elif gate_type == "no_uncommitted_changes":
+                if not job.get("repo_root"):
+                    failures.append("Gate no_uncommitted_changes failed: job.repo_root is not set.")
+                elif not git_status or not git_status.get("ok"):
+                    failures.append("Gate no_uncommitted_changes failed: could not get git status.")
+                elif not git_status.get("clean", False):
+                    failures.append("Gate no_uncommitted_changes failed: working tree is not clean.")
+
+            elif gate_type in {"diff_max_lines", "diff_min_lines"}:       
+                if not job.get("repo_root"):
+                    failures.append(f"Gate {gate_type} failed: job.repo_root is not set.")
+                    continue
+
+                bound_key = "max" if gate_type == "diff_max_lines" else "min"
+                bound = params.get(bound_key)
+                if not isinstance(bound, int) or bound < 0:
+                    failures.append(f"Gate {gate_type} misconfigured: parameters.{bound_key} must be a non-negative int.")
+                    continue
+
+                def _numstat_total(output: str) -> int:
+                    total = 0
+                    for line in output.splitlines():
+                        parts = line.split("\t")
+                        if len(parts) < 2:
+                            continue
+                        try:
+                            added = int(parts[0]) if parts[0].isdigit() else 0
+                            deleted = int(parts[1]) if parts[1].isdigit() else 0
+                            total += added + deleted
+                        except ValueError:
+                            continue
+                    return total
+
+                try:
+                    totals: list[int] = []
+                    for cmd in (["git", "diff", "--numstat"], ["git", "diff", "--numstat", "--staged"]):
+                        result = subprocess.run(
+                            cmd,
+                            cwd=job["repo_root"],
+                            capture_output=True,
+                            text=True,
+                            timeout=30,
+                        )
+                        if result.returncode != 0:
+                            failures.append(f"Gate {gate_type} failed: git diff failed.")
+                            totals = []
+                            break
+                        totals.append(_numstat_total(result.stdout))
+                    if not totals:
+                        continue
+                    total = sum(totals)
+                    if gate_type == "diff_max_lines" and total > bound:
+                        failures.append(
+                            f"Gate diff_max_lines failed: {total} changed lines exceeds max {bound}."
+                        )
+                    if gate_type == "diff_min_lines" and total < bound:
+                        failures.append(
+                            f"Gate diff_min_lines failed: {total} changed lines below min {bound}."
+                        )
+                except Exception:
+                    failures.append(f"Gate {gate_type} failed: could not compute diff stats.")
+
+            elif gate_type == "patch_applies_cleanly":
+                if not job.get("repo_root"):
+                    failures.append("Gate patch_applies_cleanly failed: job.repo_root is not set.")
+                    continue
+
+                patch = params.get("patch")
+                if not isinstance(patch, str) or not patch.strip():
+                    failures.append(
+                        "Gate patch_applies_cleanly misconfigured: parameters.patch must be a non-empty string."
+                    )
+                    continue
+
+                try:
+                    result = subprocess.run(
+                        ["git", "apply", "--check", "--whitespace=nowarn", "-"],
+                        cwd=job["repo_root"],
+                        capture_output=True,
+                        text=True,
+                        input=patch,
+                        timeout=30,
+                    )
+                    if result.returncode != 0:
+                        failures.append(
+                            "Gate patch_applies_cleanly failed: patch does not apply cleanly."
+                        )
+                except Exception:
+                    failures.append(
+                        "Gate patch_applies_cleanly failed: could not validate patch."
+                    )
+
+            else:
+                failures.append(f"Unknown gate type: {gate_type!r}.")     
+
+        return failures
 
     async def job_set_ready(self, job_id: str) -> dict[str, Any]:
         job = await self.get_job(job_id)
@@ -692,6 +980,10 @@ class VibeDevStore:
             required_keys.add("devlog_line")
         if policies.get("require_commit_per_step"):
             required_keys.add("commit_hash")
+        if policies.get("evidence_schema_mode") == "strict" and bool(step.get("acceptance_criteria")):
+            required_keys.add("criteria_checklist")
+
+        required_evidence["required"] = sorted(required_keys)
 
         # Provide a standard template (even if not all keys are required).
         evidence_template["changed_files"] = ["..."]
@@ -707,6 +999,8 @@ class VibeDevStore:
         else:
             evidence_template["criteria_checklist"] = {}
         evidence_template["notes"] = "..."
+        evidence_template["devlog_line"] = "..."
+        evidence_template["commit_hash"] = "..."
 
         what_to_produce = list(step.get("expected_outputs") or [])
         if not what_to_produce:
@@ -775,56 +1069,158 @@ class VibeDevStore:
             raise ValueError(f"Job {job_id} expects step {expected_step_id}, got {step_id}")
 
         step = await self._get_step(job_id, step_id)
-        required = list(step["required_evidence"])
-        missing_fields = [k for k in required if k not in evidence]
+        previous_rejections = await self._count_rejected_attempts(        
+            job_id=job_id,
+            step_id=step_id,
+        )
+        required_keys = set(step.get("required_evidence") or [])
 
         policies = job.get("policies") or {}
-        if policies.get("require_devlog_per_step") and not devlog_line:
-            missing_fields.append("devlog_line")
-        if policies.get("require_commit_per_step") and not commit_hash:
-            missing_fields.append("commit_hash")
-        if policies.get("require_diff_summary") and "diff_summary" not in evidence:
-            missing_fields.append("diff_summary")
-        if policies.get("require_tests_evidence"):
-            if "tests_run" not in evidence:
-                missing_fields.append("tests_run")
-            if "tests_passed" not in evidence:
-                missing_fields.append("tests_passed")
-
-        rejection_reasons: list[str] = []
-
         evidence_schema_mode = policies.get("evidence_schema_mode") or "loose"
         criteria_checklist_required = (
             evidence_schema_mode == "strict" and bool(step.get("acceptance_criteria"))
         )
+
+        if policies.get("require_diff_summary"):
+            required_keys.add("diff_summary")
+        if policies.get("require_tests_evidence"):
+            required_keys.add("tests_run")
+            required_keys.add("tests_passed")
+        if criteria_checklist_required:
+            required_keys.add("criteria_checklist")
+
+        missing_fields: list[str] = []
+        schema_errors: list[str] = []
+
+        def _add_missing(key: str) -> None:
+            if key not in missing_fields:
+                missing_fields.append(key)
+
+        # Allow evidence to carry these if not provided as explicit params.
+        if devlog_line is None and "devlog_line" in evidence:
+            if isinstance(evidence.get("devlog_line"), str):
+                devlog_line = evidence["devlog_line"]
+            else:
+                _add_missing("devlog_line")
+                schema_errors.append("evidence.devlog_line must be a string.")
+        if commit_hash is None and "commit_hash" in evidence:
+            if isinstance(evidence.get("commit_hash"), str):
+                commit_hash = evidence["commit_hash"]
+            else:
+                _add_missing("commit_hash")
+                schema_errors.append("evidence.commit_hash must be a string.")
+
+        # Missing required evidence keys.
+        for k in sorted(required_keys):
+            if k not in evidence:
+                _add_missing(k)
+
+        def _is_list_of_str(v: Any) -> bool:
+            return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+        def _is_dict_str_bool(v: Any) -> bool:
+            return (
+                isinstance(v, dict)
+                and all(isinstance(k, str) for k in v.keys())
+                and all(isinstance(x, bool) for x in v.values())
+            )
+
+        # Basic type validation for common EvidenceSchema keys.
+        if "changed_files" in required_keys and "changed_files" in evidence:
+            if not _is_list_of_str(evidence.get("changed_files")):
+                _add_missing("changed_files")
+                schema_errors.append("evidence.changed_files must be a list of strings.")
+        if "commands_run" in required_keys and "commands_run" in evidence:
+            if not _is_list_of_str(evidence.get("commands_run")):
+                _add_missing("commands_run")
+                schema_errors.append("evidence.commands_run must be a list of strings.")
+        if "tests_run" in required_keys and "tests_run" in evidence:
+            if not _is_list_of_str(evidence.get("tests_run")):
+                _add_missing("tests_run")
+                schema_errors.append("evidence.tests_run must be a list of strings.")
+        if "tests_passed" in required_keys and "tests_passed" in evidence:
+            if not isinstance(evidence.get("tests_passed"), bool):
+                _add_missing("tests_passed")
+                schema_errors.append("evidence.tests_passed must be a boolean.")
+        if "lint_run" in required_keys and "lint_run" in evidence:
+            if not isinstance(evidence.get("lint_run"), bool):
+                _add_missing("lint_run")
+                schema_errors.append("evidence.lint_run must be a boolean.")
+        if "lint_passed" in required_keys and "lint_passed" in evidence:
+            lint_passed = evidence.get("lint_passed")
+            if lint_passed is not None and not isinstance(lint_passed, bool):
+                _add_missing("lint_passed")
+                schema_errors.append("evidence.lint_passed must be a boolean or null.")
+        if "artifacts_created" in required_keys and "artifacts_created" in evidence:
+            if not _is_list_of_str(evidence.get("artifacts_created")):
+                _add_missing("artifacts_created")
+                schema_errors.append("evidence.artifacts_created must be a list of strings.")
+        if "criteria_checklist" in required_keys and "criteria_checklist" in evidence:
+            if not _is_dict_str_bool(evidence.get("criteria_checklist")):
+                _add_missing("criteria_checklist")
+                schema_errors.append("evidence.criteria_checklist must be an object of booleans.")
+
+        if policies.get("require_devlog_per_step") and not devlog_line:   
+            _add_missing("devlog_line")
+        if policies.get("require_commit_per_step") and not commit_hash:   
+            _add_missing("commit_hash")
+ 
+        rejection_reasons: list[str] = []
         criteria_checklist_all_true = True
         if criteria_checklist_required:
             raw = evidence.get("criteria_checklist")
             if not isinstance(raw, dict):
-                missing_fields.append("criteria_checklist")
+                _add_missing("criteria_checklist")
             else:
                 expected_keys = [f"c{i}" for i in range(1, len(step.get("acceptance_criteria", [])) + 1)]
                 for k in expected_keys:
                     if k not in raw:
-                        missing_fields.append("criteria_checklist")
+                        _add_missing("criteria_checklist")
+                        schema_errors.append(
+                            "evidence.criteria_checklist must include keys c1..cN."
+                        )
                         break
                 else:
-                    # All expected keys present; require all true.
+                    # All expected keys present; require all true.        
                     for k in expected_keys:
                         if raw.get(k) is not True:
                             criteria_checklist_all_true = False
                             break
 
+        gate_failures: list[str] = []
+        if not missing_fields and not (
+            criteria_checklist_required and not criteria_checklist_all_true
+        ):
+            gate_failures = await self._evaluate_step_gates(
+                job_id=job_id,
+                step=step,
+                evidence=evidence,
+            )
+
         accepted = False
         next_action = "RETRY"
         if missing_fields:
             rejection_reasons.append("Missing required evidence keys.")
+            rejection_reasons.extend(schema_errors)
         elif criteria_checklist_required and not criteria_checklist_all_true:
             rejection_reasons.append("One or more acceptance criteria were marked false.")
+        elif gate_failures:
+            rejection_reasons.extend(gate_failures)
         elif model_claim != "MET":
             rejection_reasons.append("Model claim is not MET.")
         else:
             accepted = True
+
+        if not accepted:
+            max_retries = int(policies.get("max_retries_per_step") or 2)
+            exhausted_action = str(policies.get("retry_exhausted_action") or "PAUSE_FOR_HUMAN")
+            failure_count = previous_rejections + 1
+            if max_retries > 0 and failure_count >= max_retries:
+                next_action = exhausted_action
+                if exhausted_action == "PAUSE_FOR_HUMAN":
+                    await self.job_pause(job_id)
+                elif exhausted_action == "FAIL_JOB":
+                    await self.job_fail(job_id, f"Retry limit reached for {step_id}")
 
         if accepted:
             idx = int(job.get("current_step_index") or 0) + 1
@@ -893,9 +1289,11 @@ class VibeDevStore:
             step = dict(row)
             step["acceptance_criteria"] = json.loads(step.pop("acceptance_criteria_json") or "[]")
             step["required_evidence"] = json.loads(step.pop("required_evidence_json") or "[]")
-            expected_outputs_json = step.pop("expected_outputs_json", None)
+            expected_outputs_json = step.pop("expected_outputs_json", None)     
             step["expected_outputs"] = json.loads(expected_outputs_json or "[]") if expected_outputs_json else []
             step["context_refs"] = json.loads(step.pop("context_refs_json") or "[]")
+            gates_json = step.pop("gates_json", None)
+            step["gates"] = json.loads(gates_json or "[]") if gates_json else []
             steps.append(step)
         return steps
 
@@ -966,7 +1364,7 @@ class VibeDevStore:
         # Get current step details if executing
         current_step = None
         current_step_attempts: list[dict[str, Any]] = []
-        if job["status"] == "EXECUTING" and job.get("step_order"):
+        if job["status"] in {"EXECUTING", "PAUSED"} and job.get("step_order"):
             idx = job.get("current_step_index", 0)
             if idx < len(job["step_order"]):
                 current_step_id = job["step_order"][idx]
@@ -993,7 +1391,7 @@ class VibeDevStore:
         for i, step in enumerate(steps):
             if job["status"] == "COMPLETE":
                 status = "DONE"
-            elif job["status"] != "EXECUTING":
+            elif job["status"] not in {"EXECUTING", "PAUSED"}:
                 status = "PENDING"
             elif i < current_idx:
                 status = "DONE"
@@ -1007,7 +1405,7 @@ class VibeDevStore:
                 "attempt_count": attempt_counts.get(step["step_id"], 0),
             })
 
-        if job["status"] == "EXECUTING" and job.get("step_order"):
+        if job["status"] in {"EXECUTING", "PAUSED"} and job.get("step_order"):
             idx = int(job.get("current_step_index") or 0)
             if 0 <= idx < len(job["step_order"]):
                 current_step_id = job["step_order"][idx]
@@ -1237,9 +1635,10 @@ class VibeDevStore:
                     "instruction_prompt": s["instruction_prompt"],
                     "acceptance_criteria": s.get("acceptance_criteria", []),
                     "required_evidence": s.get("required_evidence", []),
-                    "expected_outputs": s.get("expected_outputs", []),
+                    "expected_outputs": s.get("expected_outputs", []),    
                     "remediation_prompt": s.get("remediation_prompt", ""),
                     "context_refs": s.get("context_refs", []),
+                    "gates": s.get("gates", []),
                 }
                 for s in steps
             ],
@@ -1249,14 +1648,15 @@ class VibeDevStore:
     def _normalize_step_data(self, data: dict[str, Any], default_index: int) -> dict[str, Any]:
         """Normalize step data with defaults."""
         return {
-            "step_id": data.get("step_id") or f"S{default_index}",
+            "step_id": data.get("step_id") or f"S{default_index}",        
             "title": data.get("title", "Untitled Step"),
-            "instruction_prompt": data.get("instruction_prompt", ""),
-            "acceptance_criteria": data.get("acceptance_criteria", []),
-            "required_evidence": data.get("required_evidence", []),
+            "instruction_prompt": data.get("instruction_prompt", ""),     
+            "acceptance_criteria": data.get("acceptance_criteria", []),   
+            "required_evidence": data.get("required_evidence", []),       
             "expected_outputs": data.get("expected_outputs", []),
-            "remediation_prompt": data.get("remediation_prompt", ""),
+            "remediation_prompt": data.get("remediation_prompt", ""),     
             "context_refs": data.get("context_refs", []),
+            "gates": data.get("gates", []),
         }
 
     # =========================================================================
@@ -1332,7 +1732,7 @@ class VibeDevStore:
         job = await self.get_job(job_id)
         repo_root = job.get("repo_root")
         if not repo_root:
-            raise ValueError(f"Job {job_id} has no repo_root set")
+            raise ValueError(f"Job {job_id} has no repo_root set")        
 
         try:
             result = subprocess.run(
@@ -1345,10 +1745,26 @@ class VibeDevStore:
             if result.returncode != 0:
                 return {"ok": False, "error": result.stderr}
 
-            lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
-            modified = [l[3:] for l in lines if l.startswith(" M")]
-            added = [l[3:] for l in lines if l.startswith("A ") or l.startswith("??")]
-            deleted = [l[3:] for l in lines if l.startswith(" D")]
+            lines = result.stdout.splitlines() if result.stdout else []
+            modified: list[str] = []
+            added: list[str] = []
+            deleted: list[str] = []
+
+            for line in lines:
+                if not line or len(line) < 4:
+                    continue
+                status = line[:2]
+                path = line[3:]
+                if " -> " in path:
+                    _, path = path.split(" -> ", 1)
+                if status == "??":
+                    added.append(path)
+                elif "D" in status:
+                    deleted.append(path)
+                elif "A" in status:
+                    added.append(path)
+                else:
+                    modified.append(path)
 
             return {
                 "ok": True,

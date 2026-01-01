@@ -4,6 +4,7 @@
 
 import { useEffect, useCallback } from 'react';
 import { useVibeDevStore } from '@/stores/useVibeDevStore';
+import { getNextStepPrompt } from '@/lib/api';
 
 /**
  * Hook that automatically copies the current step's instruction prompt
@@ -35,17 +36,41 @@ export function useClipboardBridge() {
 
   // Auto-copy when step changes and bridge is enabled
   useEffect(() => {
-    if (!clipboardBridgeEnabled || !currentStep?.instruction_prompt) {
+    const jobId = uiState?.job?.job_id;
+    if (!clipboardBridgeEnabled || !currentStep?.instruction_prompt || !jobId) {
       return;
     }
 
-    const prompt = currentStep.instruction_prompt;
+    let cancelled = false;
 
-    // Only copy if the prompt is different from what we last copied
-    if (prompt !== lastClipboardContent) {
-      copyToClipboard(prompt);
-    }
-  }, [currentStep?.step_id, currentStep?.instruction_prompt, clipboardBridgeEnabled, lastClipboardContent, copyToClipboard]);
+    const copy = async () => {
+      try {
+        const stepPrompt = await getNextStepPrompt(jobId);
+        const prompt = stepPrompt.prompt || currentStep.instruction_prompt;
+        if (!cancelled && prompt !== lastClipboardContent) {
+          await copyToClipboard(prompt);
+        }
+      } catch {
+        const prompt = currentStep.instruction_prompt;
+        if (!cancelled && prompt !== lastClipboardContent) {
+          await copyToClipboard(prompt);
+        }
+      }
+    };
+
+    copy();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentStep?.step_id,
+    currentStep?.instruction_prompt,
+    clipboardBridgeEnabled,
+    lastClipboardContent,
+    copyToClipboard,
+    uiState?.job?.job_id,
+  ]);
 
   // Manual copy function for UI buttons
   const copyCurrentPrompt = useCallback(() => {

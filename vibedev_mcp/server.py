@@ -54,6 +54,8 @@ DEFAULT_POLICIES: dict[str, Any] = {
     "inject_invariants_every_step": True,
     "inject_mistakes_every_step": True,
     "evidence_schema_mode": "loose",
+    "max_retries_per_step": 2,
+    "retry_exhausted_action": "PAUSE_FOR_HUMAN",
 }
 
 
@@ -339,6 +341,10 @@ class StepSpec(BaseModel):
     )
     acceptance_criteria: list[str] = Field(default_factory=list)
     required_evidence: list[str] = Field(default_factory=list)
+    gates: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Optional gate definitions (type/parameters/description).",
+    )
     remediation_prompt: str = Field(default="", description="Prompt to repair if criteria not met")
     context_refs: list[str] = Field(default_factory=list)
 

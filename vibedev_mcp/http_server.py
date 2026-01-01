@@ -31,6 +31,8 @@ DEFAULT_POLICIES: dict[str, Any] = {
     "inject_invariants_every_step": True,
     "inject_mistakes_every_step": True,
     "evidence_schema_mode": "loose",
+    "max_retries_per_step": 2,
+    "retry_exhausted_action": "PAUSE_FOR_HUMAN",
 }
 
 

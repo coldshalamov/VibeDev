@@ -24,6 +24,8 @@ export interface Policies {
   inject_invariants_every_step?: boolean;
   inject_mistakes_every_step?: boolean;
   evidence_schema_mode?: 'loose' | 'strict';
+  max_retries_per_step?: number;
+  retry_exhausted_action?: 'PAUSE_FOR_HUMAN' | 'FAIL_JOB';
 }
 
 export interface Job {
@@ -52,6 +54,11 @@ export interface Step {
   expected_outputs: string[];
   acceptance_criteria: string[];
   required_evidence: string[];
+  gates?: Array<{
+    type: string;
+    parameters?: Record<string, unknown>;
+    description?: string;
+  }>;
   remediation_prompt: string;
   context_refs: string[];
   status: StepStatus;
@@ -69,6 +76,8 @@ export interface Evidence {
   artifacts_created?: string[];
   criteria_checklist?: Record<string, boolean>;
   notes?: string;
+  devlog_line?: string;
+  commit_hash?: string;
 }
 
 export interface Attempt {
@@ -176,7 +185,12 @@ export interface JobListResponse {
 export interface SubmitResult {
   accepted: boolean;
   feedback: string;
-  next_action: 'RETRY' | 'NEXT_STEP_AVAILABLE' | 'JOB_COMPLETE';
+  next_action:
+    | 'RETRY'
+    | 'NEXT_STEP_AVAILABLE'
+    | 'JOB_COMPLETE'
+    | 'PAUSE_FOR_HUMAN'
+    | 'FAIL_JOB';
   missing_fields: string[];
   rejection_reasons: string[];
 }

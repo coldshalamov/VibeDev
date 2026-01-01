@@ -2,13 +2,14 @@
 // Execution Dashboard Component - Active Step & Evidence Viewer
 // =============================================================================
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useVibeDevStore } from '@/stores/useVibeDevStore';
 import {
   useStartJob,
   useResumeJob,
   useSubmitStepResult,
   useAppendDevlog,
+  useStepPrompt,
 } from '@/hooks/useUIState';
 import { cn, formatDate } from '@/lib/utils';
 
@@ -33,7 +34,14 @@ export function ExecutionDashboard() {
 
   // Handle PAUSED state
   if (job.status === 'PAUSED') {
-    return <PausedView jobId={currentJobId} job={job} />;
+    return (
+      <PausedView
+        jobId={currentJobId}
+        job={job}
+        currentStep={current_step}
+        attempts={current_step_attempts}
+      />
+    );
   }
 
   // Handle COMPLETE state
@@ -109,17 +117,57 @@ function StartExecutionView({ jobId }: { jobId: string }) {
   );
 }
 
-function PausedView({ jobId, job }: { jobId: string; job: any }) {
+function PausedView({
+  jobId,
+  job,
+  currentStep,
+  attempts,
+}: {
+  jobId: string;
+  job: any;
+  currentStep: any;
+  attempts: any[];
+}) {
   const resumeMutation = useResumeJob(jobId);
+  const latestAttempt = attempts?.[0];
 
   return (
     <div className="flex h-full items-center justify-center">
       <div className="text-center">
         <div className="text-6xl mb-4">⏸️</div>
-        <h2 className="text-xl font-semibold mb-2">Execution Paused</h2>
+        <h2 className="text-xl font-semibold mb-2">Execution Paused</h2> 
         <p className="text-muted-foreground mb-6">
           {job.title} is currently paused.
         </p>
+        {currentStep && (
+          <div className="mb-6 text-sm">
+            <div className="font-medium">
+              Paused on {currentStep.step_id}: {currentStep.title}
+            </div>
+            {latestAttempt?.outcome === 'rejected' &&
+              (latestAttempt?.rejection_reasons?.length > 0 ||
+                latestAttempt?.missing_fields?.length > 0) && (
+                <div className="mt-3 text-left max-w-xl mx-auto rounded border bg-muted p-3">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                    Last Rejection
+                  </div>
+                  {latestAttempt?.missing_fields?.length > 0 && (
+                    <div className="text-xs mb-2">
+                      <span className="font-medium">Missing:</span>{' '}
+                      {latestAttempt.missing_fields.join(', ')}
+                    </div>
+                  )}
+                  {latestAttempt?.rejection_reasons?.length > 0 && (
+                    <ul className="list-disc list-inside text-xs space-y-1">
+                      {latestAttempt.rejection_reasons.map((r: string, i: number) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+          </div>
+        )}
         <button
           onClick={() => resumeMutation.mutate()}
           disabled={resumeMutation.isPending}
@@ -274,6 +322,7 @@ function ActiveStepPanel({
   jobId: string;
 }) {
   const [showSubmitForm, setShowSubmitForm] = useState(false);
+  const { data: stepPrompt } = useStepPrompt(jobId, step?.step_id ?? null);
 
   return (
     <div className="space-y-6">
@@ -307,9 +356,35 @@ function ActiveStepPanel({
           </button>
         </div>
         <div className="prose prose-sm dark:prose-invert max-w-none">
-          <p className="whitespace-pre-wrap">{step.instruction_prompt}</p>
+          <p className="whitespace-pre-wrap">{step.instruction_prompt}</p>      
         </div>
       </div>
+
+      {/* Step Prompt Preview (Full) */}
+      {stepPrompt?.prompt && (
+        <div className="panel">
+          <div className="panel-header">
+            <h3 className="panel-title">Step Prompt (Copy/Paste)</h3>
+            <button
+              onClick={() => navigator.clipboard.writeText(stepPrompt.prompt)}
+              className="btn btn-ghost btn-icon"
+              title="Copy step prompt"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                />
+              </svg>
+            </button>
+          </div>
+          <pre className="text-xs whitespace-pre-wrap font-mono bg-muted/50 rounded-lg p-3 overflow-auto">
+            {stepPrompt.prompt}
+          </pre>
+        </div>
+      )}
 
       {/* Acceptance Criteria */}
       {step.acceptance_criteria?.length > 0 && (
@@ -357,9 +432,10 @@ function ActiveStepPanel({
                 key={attempt.attempt_id}
                 className={cn(
                   'p-3 rounded-lg border',
-                  attempt.verdict === 'MET' && 'bg-green-50 border-green-200 dark:bg-green-900/20',
-                  attempt.verdict === 'NOT_MET' && 'bg-red-50 border-red-200 dark:bg-red-900/20',
-                  attempt.verdict === 'PARTIAL' && 'bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20'
+                  attempt.outcome === 'accepted' &&
+                    'bg-green-50 border-green-200 dark:bg-green-900/20',
+                  attempt.outcome === 'rejected' &&
+                    'bg-red-50 border-red-200 dark:bg-red-900/20'
                 )}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -367,15 +443,26 @@ function ActiveStepPanel({
                   <span
                     className={cn(
                       'text-xs px-2 py-0.5 rounded-full',
-                      attempt.verdict === 'MET' && 'bg-green-200 text-green-800',
-                      attempt.verdict === 'NOT_MET' && 'bg-red-200 text-red-800',
-                      attempt.verdict === 'PARTIAL' && 'bg-yellow-200 text-yellow-800'
+                      attempt.outcome === 'accepted' &&
+                        'bg-green-200 text-green-800',
+                      attempt.outcome === 'rejected' && 'bg-red-200 text-red-800'
                     )}
                   >
-                    {attempt.verdict}
+                    {attempt.model_claim} / {attempt.outcome}
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground">{attempt.summary}</p>
+                {(attempt.missing_fields?.length > 0 ||
+                  attempt.rejection_reasons?.length > 0) && (
+                  <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                    {attempt.missing_fields?.length > 0 && (
+                      <div>Missing: {attempt.missing_fields.join(', ')}</div>
+                    )}
+                    {attempt.rejection_reasons?.length > 0 && (
+                      <div>Reasons: {attempt.rejection_reasons.join(' | ')}</div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -397,6 +484,7 @@ function ActiveStepPanel({
         <SubmitResultForm
           jobId={jobId}
           stepId={step.step_id}
+          stepPrompt={stepPrompt}
           onClose={() => setShowSubmitForm(false)}
         />
       )}
@@ -407,28 +495,53 @@ function ActiveStepPanel({
 function SubmitResultForm({
   jobId,
   stepId,
+  stepPrompt,
   onClose,
 }: {
   jobId: string;
   stepId: string;
+  stepPrompt: any;
   onClose: () => void;
 }) {
   const [claim, setClaim] = useState<'MET' | 'NOT_MET' | 'PARTIAL'>('MET');
   const [summary, setSummary] = useState('');
   const [evidence, setEvidence] = useState('');
   const [devlogLine, setDevlogLine] = useState('');
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
 
   const submitMutation = useSubmitStepResult(jobId);
+
+  useEffect(() => {
+    if (!stepPrompt?.required_evidence_template) return;
+    if (evidence.trim()) return;
+    setEvidence(JSON.stringify(stepPrompt.required_evidence_template, null, 2) + '\n');
+  }, [stepPrompt?.required_evidence_template, evidence]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!summary.trim()) return;
 
+    let parsedEvidence: Record<string, unknown> = {};
+    const rawEvidence = evidence.trim();
+    if (rawEvidence) {
+      try {
+        parsedEvidence = JSON.parse(rawEvidence) as Record<string, unknown>;
+      } catch (error) {
+        setEvidenceError(
+          error instanceof Error
+            ? `Evidence must be valid JSON: ${error.message}`
+            : 'Evidence must be valid JSON'
+        );
+        return;
+      }
+    }
+    setEvidenceError(null);
+
     await submitMutation.mutateAsync({
       stepId,
       modelClaim: claim,
       summary: summary.trim(),
-      evidence: { raw: evidence.trim() },
+      evidence: parsedEvidence,
       devlogLine: devlogLine.trim() || undefined,
     });
 
@@ -484,13 +597,19 @@ function SubmitResultForm({
         {/* Evidence */}
         <div>
           <label className="block text-sm font-medium mb-1">Evidence</label>
+          <p className="text-xs text-muted-foreground mb-2">
+            Paste the EvidenceSchema JSON object here (this is sent to the verifier as structured data).
+          </p>
           <textarea
             value={evidence}
             onChange={(e) => setEvidence(e.target.value)}
             rows={4}
-            placeholder="Paste test output, code snippets, or other evidence..."
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+            placeholder="Paste EvidenceSchema JSON (from the step prompt template)..."
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring resize-none"     
           />
+          {evidenceError && (
+            <p className="text-sm text-red-600 mt-2">{evidenceError}</p>
+          )}
         </div>
 
         {/* Devlog */}

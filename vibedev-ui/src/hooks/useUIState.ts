@@ -16,6 +16,7 @@ export const queryKeys = {
   job: (jobId: string) => ['jobs', jobId] as const,
   uiState: (jobId: string) => ['jobs', jobId, 'ui-state'] as const,
   questions: (jobId: string) => ['jobs', jobId, 'questions'] as const,
+  stepPrompt: (jobId: string) => ['jobs', jobId, 'step-prompt'] as const,
   devlog: (jobId: string) => ['jobs', jobId, 'devlog'] as const,
   gitStatus: (jobId: string) => ['jobs', jobId, 'git', 'status'] as const,
   gitLog: (jobId: string) => ['jobs', jobId, 'git', 'log'] as const,
@@ -123,6 +124,21 @@ export function useRepoHygiene(jobId: string | null) {
     },
     enabled: !!jobId,
     staleTime: 60000, // Cache for 1 minute
+  });
+}
+
+// =============================================================================
+// Step Prompt Hook (Execution)
+// =============================================================================
+
+export function useStepPrompt(jobId: string | null, stepId: string | null) {
+  return useQuery({
+    queryKey: jobId ? [...queryKeys.stepPrompt(jobId), stepId] : ['noop'],
+    queryFn: async () => {
+      if (!jobId) return null;
+      return api.getNextStepPrompt(jobId);
+    },
+    enabled: !!jobId && !!stepId,
   });
 }
 
