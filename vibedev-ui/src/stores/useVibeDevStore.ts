@@ -98,7 +98,7 @@ export const useVibeDevStore = create<VibeDevState>()(
         currentJobId: null,
         uiState: null,
 
-        viewMode: { mode: 'workflow' },
+        viewMode: { mode: 'research' },
         sidebar: {
           isOpen: true,
           activeSection: 'metadata',

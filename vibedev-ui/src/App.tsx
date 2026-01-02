@@ -107,7 +107,6 @@ function App() {
 
           {/* View Mode Tabs */}
           <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
-            <ViewModeTab mode="workflow" label="Workflow" />
             <ViewModeTab mode="research" label="Research" />
             <ViewModeTab mode="planning" label="Planning" />
             <ViewModeTab mode="execution" label="Execution" />
@@ -124,8 +123,6 @@ function App() {
         <div className="flex-1 overflow-auto">
           {!currentJobId ? (
             <EmptyState />
-          ) : viewMode === 'workflow' ? (
-            <UnifiedWorkflowView />
           ) : viewMode === 'research' ? (
             <UnifiedWorkflowView phase="research" />
           ) : viewMode === 'planning' ? (

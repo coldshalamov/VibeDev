@@ -1,35 +1,35 @@
 // =============================================================================
-// Unified Workflow View - Same editor for all phases
+// Unified Workflow View - Uses Horizontal Step Flow
 // =============================================================================
 
 import { useState, useEffect } from 'react';
-import { WorkflowEditor, type Workflow } from './WorkflowEditor';
+import { HorizontalStepFlow, type Flow } from './HorizontalStepFlow';
 import { useVibeDevStore } from '@/stores/useVibeDevStore';
 
 const PHASE_LABELS: Record<string, { title: string; description: string }> = {
     research: {
-        title: 'Research Phase',
-        description: 'Define prompts to explore the codebase and gather context.',
+        title: 'Research',
+        description: 'Explore the codebase and gather context',
     },
     planning: {
-        title: 'Planning Phase',
-        description: 'Design the implementation strategy and break down tasks.',
+        title: 'Planning',
+        description: 'Design the implementation strategy',
     },
     execution: {
-        title: 'Execution Phase',
-        description: 'Define the prompts that will implement the actual changes.',
+        title: 'Execution',
+        description: 'Implement the actual changes',
     },
     review: {
-        title: 'Review Phase',
-        description: 'Verification and cleanup prompts to ensure quality.',
+        title: 'Review',
+        description: 'Verify and clean up',
     },
 };
 
-const DEFAULT_WORKFLOW: Workflow = {
-    name: 'New Workflow',
-    version: '1.0',
+const DEFAULT_FLOW: Flow = {
+    name: '',
     description: '',
-    blocks: [],
+    steps: [],
+    globalContext: '',
 };
 
 type Props = {
@@ -40,45 +40,28 @@ export function UnifiedWorkflowView({ phase }: Props) {
     const currentJobId = useVibeDevStore((state) => state.currentJobId);
     const uiState = useVibeDevStore((state) => state.uiState);
 
-    // Separate workflow for each phase (stored in localStorage for now)
-    const storageKey = `vibedev-workflow-${currentJobId}-${phase || 'all'}`;
+    const storageKey = `vibedev-flow-${currentJobId}-${phase || 'all'}`;
 
-    const [workflow, setWorkflow] = useState<Workflow>(() => {
+    const [flow, setFlow] = useState<Flow>(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem(storageKey);
             if (saved) {
-                try {
-                    return JSON.parse(saved);
-                } catch { }
+                try { return JSON.parse(saved); } catch { }
             }
         }
+        const phaseInfo = phase ? PHASE_LABELS[phase] : null;
         return {
-            ...DEFAULT_WORKFLOW,
-            name: phase ? PHASE_LABELS[phase]?.title || 'Workflow' : uiState?.job?.title || 'Workflow',
-            description: phase ? PHASE_LABELS[phase]?.description || '' : uiState?.job?.goal || '',
+            ...DEFAULT_FLOW,
+            name: phaseInfo?.title || uiState?.job?.title || 'Workflow',
+            description: phaseInfo?.description || uiState?.job?.goal || '',
         };
     });
 
-    // Global context that applies to all prompts
-    const [globalContext, setGlobalContext] = useState(() => {
-        if (typeof window !== 'undefined') {
-            return localStorage.getItem(`vibedev-global-context-${currentJobId}`) || '';
-        }
-        return '';
-    });
-
-    // Save to localStorage on change
     useEffect(() => {
         if (currentJobId) {
-            localStorage.setItem(storageKey, JSON.stringify(workflow));
+            localStorage.setItem(storageKey, JSON.stringify(flow));
         }
-    }, [workflow, storageKey, currentJobId]);
-
-    useEffect(() => {
-        if (currentJobId) {
-            localStorage.setItem(`vibedev-global-context-${currentJobId}`, globalContext);
-        }
-    }, [globalContext, currentJobId]);
+    }, [flow, storageKey, currentJobId]);
 
     if (!currentJobId || !uiState) {
         return (
@@ -86,67 +69,44 @@ export function UnifiedWorkflowView({ phase }: Props) {
                 <div className="text-center">
                     <div className="text-4xl mb-4">🚀</div>
                     <p className="text-lg font-medium">No active job</p>
-                    <p className="text-sm">Create or select a job to start building your workflow</p>
+                    <p className="text-sm">Create or select a job to start</p>
                 </div>
             </div>
         );
     }
 
-    const phaseInfo = phase ? PHASE_LABELS[phase] : null;
-
     return (
         <div className="h-full flex">
             {/* Main Editor */}
-            <div className="flex-1 flex flex-col">
-                {phaseInfo && (
-                    <div className="px-6 py-4 border-b border-white/5 bg-card/50">
-                        <h1 className="text-xl font-bold">{phaseInfo.title}</h1>
-                        <p className="text-sm text-muted-foreground">{phaseInfo.description}</p>
-                    </div>
-                )}
-                <div className="flex-1">
-                    <WorkflowEditor
-                        workflow={workflow}
-                        onChange={setWorkflow}
-                    />
-                </div>
+            <div className="flex-1">
+                <HorizontalStepFlow flow={flow} onChange={setFlow} />
             </div>
 
             {/* Global Context Sidebar */}
-            <div className="w-80 border-l border-white/5 bg-card/30 flex flex-col">
-                <div className="p-4 border-b border-white/5">
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+            <div className="w-72 border-l border-white/5 bg-card/30 flex flex-col">
+                <div className="p-3 border-b border-white/5">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                         Global Context
                     </h3>
-                    <p className="text-xs text-muted-foreground/70 mt-1">
-                        Injected into every prompt in this job
+                    <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                        Injected into every prompt
                     </p>
                 </div>
-                <div className="flex-1 p-4">
+                <div className="flex-1 p-3">
                     <textarea
-                        value={globalContext}
-                        onChange={(e) => setGlobalContext(e.target.value)}
-                        placeholder={`Repository: ${uiState.job.repo_root || '/path/to/repo'}
+                        value={flow.globalContext}
+                        onChange={(e) => setFlow({ ...flow, globalContext: e.target.value })}
+                        placeholder={`Repo: ${uiState.job.repo_root || '/path/to/repo'}
 
-Key files:
-- src/main.py
+Files:
+- src/
 - tests/
 
 Invariants:
-- Don't break existing tests
-- Follow existing code style
-
-Tech stack:
-- Python 3.11
-- React + TypeScript
-- SQLite`}
-                        className="w-full h-full bg-black/30 border border-white/10 rounded-lg p-3 text-xs font-mono resize-none focus:border-primary/40 focus:outline-none"
+- Don't break tests
+- Follow code style`}
+                        className="w-full h-full bg-black/30 border border-white/10 rounded-lg p-2 text-[11px] font-mono resize-none focus:border-primary/40 focus:outline-none"
                     />
-                </div>
-                <div className="p-4 border-t border-white/5">
-                    <div className="text-[10px] text-muted-foreground/60 font-mono">
-                        This context is automatically prepended to all prompts.
-                    </div>
                 </div>
             </div>
         </div>
