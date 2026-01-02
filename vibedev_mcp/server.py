@@ -11,6 +11,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibedev_mcp.conductor import compute_next_questions
+from vibedev_mcp.models import ModelClaim
 from vibedev_mcp.store import VibeDevStore
 from vibedev_mcp.templates import get_template, list_templates
 
@@ -413,7 +414,7 @@ class SubmitStepResultInput(BaseModel):
 
     job_id: str = Field(..., min_length=1)
     step_id: str = Field(..., min_length=1)
-    model_claim: str = Field(..., description="MET / NOT_MET / PARTIAL")
+    model_claim: ModelClaim = Field(..., description="MET / NOT_MET / PARTIAL")
     summary: str = Field(..., min_length=1)
     evidence: dict[str, Any] = Field(default_factory=dict)
     devlog_line: str | None = Field(default=None)

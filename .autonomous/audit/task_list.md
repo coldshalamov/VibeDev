@@ -32,9 +32,9 @@
 ### Phase 3: Integration & Testing
 - [x] Task 15: Run existing tests and record results
 - [x] Task 16: Perform manual API smoke checks (if feasible)
-- [ ] Task 17: Cross-check documentation vs implementation
-- [ ] Task 18: Compile findings with severity, impact, and evidence
+- [x] Task 17: Cross-check documentation vs implementation
+- [x] Task 18: Compile findings with severity, impact, and evidence
 
 ### Phase 4: Polish & Documentation
-- [ ] Task 19: Draft audit report with recommendations
-- [ ] Task 20: Summarize remediation roadmap and next steps
+- [x] Task 19: Draft audit report with recommendations
+- [x] Task 20: Summarize remediation roadmap and next steps
