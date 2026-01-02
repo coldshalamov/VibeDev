@@ -3,6 +3,8 @@
 @tailwind utilities;
 
 @layer base {
+
+  /* Default: Dark mode */
   :root {
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
@@ -14,8 +16,7 @@
     --popover-foreground: 210 40% 98%;
 
     --primary: 210 100% 50%;
-    /* Electric Vibe Blue */
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary-foreground: 0 0% 100%;
 
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
@@ -36,19 +37,50 @@
     --radius: 0.5rem;
   }
 
+  /* Light mode */
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 98%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 210 100% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 210 40% 96%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 210 100% 50%;
+  }
+
+  /* Dark mode (explicit) */
   .dark {
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
 
     --card: 217 33% 8%;
-    /* Slightly darker card */
     --card-foreground: 210 40% 98%;
 
     --popover: 222.2 84% 4.9%;
     --popover-foreground: 210 40% 98%;
 
     --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary-foreground: 0 0% 100%;
 
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
@@ -82,11 +114,11 @@
 
 /* Glassmorphism Utilities */
 .glass {
-  @apply bg-white/5 backdrop-blur-md border border-white/10 shadow-lg;
+  @apply bg-foreground/5 backdrop-blur-md border border-foreground/10 shadow-lg;
 }
 
 .glass-panel {
-  @apply bg-card/50 backdrop-blur-md border border-white/5 rounded-xl;
+  @apply bg-card/80 backdrop-blur-md border border-foreground/5 rounded-xl;
 }
 
 /* Legacy layout helpers (kept for compatibility across dashboard panels) */
@@ -96,12 +128,45 @@
   }
 
   .panel-header {
-    @apply flex items-center justify-between p-4 border-b border-white/5 bg-black/20;
+    @apply flex items-center justify-between p-4 border-b border-foreground/5 bg-foreground/5;
   }
 
   .panel-title {
-    @apply text-sm font-bold tracking-tight text-white/90;
+    @apply text-sm font-bold tracking-tight text-foreground/90;
   }
+}
+
+/* Light mode overrides for hardcoded dark colors */
+.light .border-white\/5 {
+  border-color: hsl(var(--border));
+}
+
+.light .border-white\/10 {
+  border-color: hsl(var(--border));
+}
+
+.light .bg-black\/20 {
+  background-color: hsl(var(--muted));
+}
+
+.light .bg-black\/30 {
+  background-color: hsl(var(--muted));
+}
+
+.light .bg-black\/40 {
+  background-color: hsl(var(--muted));
+}
+
+.light .text-white {
+  color: hsl(var(--foreground));
+}
+
+.light .text-white\/90 {
+  color: hsl(var(--foreground) / 0.9);
+}
+
+.light .text-white\/70 {
+  color: hsl(var(--foreground) / 0.7);
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -156,4 +221,14 @@
 /* Step Node Customizations */
 .step-node-active {
   @apply ring-2 ring-primary ring-offset-2 ring-offset-background;
+}
+
+/* Background Patterns */
+.bg-dots-pattern {
+  background-image: radial-gradient(rgba(128, 128, 128, 0.1) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.light .bg-dots-pattern {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.1) 1px, transparent 1px);
 }

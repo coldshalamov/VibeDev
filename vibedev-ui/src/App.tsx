@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { useVibeDevStore, useViewMode, useTheme } from '@/stores/useVibeDevStore';
 import { useUIState, useCreateJob } from '@/hooks/useUIState';
 import { useJobEvents } from '@/hooks/useJobEvents';
-import { GlobalSidebar } from '@/components/GlobalSidebar';
+import { InfoSidebar } from '@/components/InfoSidebar';
 import { MainCanvas } from '@/components/MainCanvas';
 import { ResearchDashboard } from '@/components/ResearchDashboard';
 import { ExecutionDashboard } from '@/components/ExecutionDashboard';
@@ -71,10 +71,10 @@ function App() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      {/* Global Sidebar */}
+      {/* Info Sidebar - Findings, Mistakes, Log */}
       {sidebar.isOpen && (
-        <aside className="w-80 flex-shrink-0 animate-slide-in-left">
-          <GlobalSidebar />
+        <aside className="w-72 flex-shrink-0">
+          <InfoSidebar />
         </aside>
       )}
 
@@ -102,6 +102,20 @@ function App() {
                 />
               </svg>
             </button>
+
+            {/* Back to Home Button (Visible when job is selected) */}
+            {currentJobId && (
+              <button
+                onClick={() => useVibeDevStore.getState().setCurrentJob(null)}
+                className="btn btn-ghost btn-icon"
+                title="Back to Job List"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+              </button>
+            )}
+
             <JobSelector />
           </div>
 

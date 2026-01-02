@@ -144,7 +144,7 @@ export const useVibeDevStore = create<VibeDevState>()(
           // based on job status.
           if (jobChanged) {
             if (status === 'PLANNING') {
-              set({ viewMode: { mode: 'planning' } });
+              set({ viewMode: { mode: 'research' } });
             } else if (status === 'EXECUTING' || status === 'READY') {
               set({ viewMode: { mode: 'execution' } });
             } else if (status === 'COMPLETE' || status === 'ARCHIVED') {
@@ -261,6 +261,7 @@ export const useVibeDevStore = create<VibeDevState>()(
         partialize: (state) => ({
           theme: state.theme,
           notifications: state.notifications,
+          currentJobId: state.currentJobId,
           sidebar: { isOpen: state.sidebar.isOpen },
           automation: {
             autoAdvanceSteps: state.automation.autoAdvanceSteps,

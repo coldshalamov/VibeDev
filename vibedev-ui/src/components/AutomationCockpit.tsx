@@ -23,26 +23,25 @@ export function AutomationCockpit({ compact = false }: AutomationCockpitProps) {
   const pauseMutation = usePauseJob(currentJobId || '');
   const resumeMutation = useResumeJob(currentJobId || '');
 
-  if (!currentJobId || !uiState) {
-    return null;
-  }
-
-  const isExecuting = uiState.job.status === 'EXECUTING';
-  const isPaused = uiState.job.status === 'PAUSED';
+  const hasJob = currentJobId && uiState;
+  const isExecuting = hasJob && uiState.job.status === 'EXECUTING';
+  const isPaused = hasJob && uiState.job.status === 'PAUSED';
   const canControl = isExecuting || isPaused;
 
   if (compact) {
     return (
-      <div className="flex items-center gap-2">
-        {/* Status indicator */}
-        <div className="flex items-center gap-2">
-          <StatusIndicator status={uiState.job.status} />
-          <span className="text-sm font-medium hidden sm:inline">
-            {uiState.job.status}
-          </span>
-        </div>
+      <div className="flex items-center gap-2 relative">
+        {/* Status indicator - only show if job exists */}
+        {hasJob && (
+          <div className="flex items-center gap-2">
+            <StatusIndicator status={uiState.job.status} />
+            <span className="text-sm font-medium hidden sm:inline">
+              {uiState.job.status}
+            </span>
+          </div>
+        )}
 
-        {/* Control buttons */}
+        {/* Control buttons - only show if can control */}
         {canControl && (
           <div className="flex items-center gap-1">
             {isPaused ? (
@@ -67,11 +66,11 @@ export function AutomationCockpit({ compact = false }: AutomationCockpitProps) {
           </div>
         )}
 
-        {/* Settings button */}
+        {/* Settings button - ALWAYS visible */}
         <button
           onClick={() => setShowSettings(!showSettings)}
           className="btn btn-ghost btn-icon"
-          title="Automation settings"
+          title="Settings"
         >
           <SettingsIcon />
         </button>
@@ -80,10 +79,10 @@ export function AutomationCockpit({ compact = false }: AutomationCockpitProps) {
         {showSettings && (
           <>
             <div
-              className="fixed inset-0 z-10"
+              className="fixed inset-0 z-40"
               onClick={() => setShowSettings(false)}
             />
-            <div className="absolute right-0 top-full mt-2 z-20 w-72 rounded-lg border bg-card shadow-lg animate-fade-in">
+            <div className="absolute right-0 top-full mt-2 z-50 w-72 rounded-lg border bg-card shadow-lg animate-fade-in">
               <AutomationSettingsPanel />
             </div>
           </>
@@ -144,11 +143,10 @@ export function AutomationCockpit({ compact = false }: AutomationCockpitProps) {
             <div
               className="h-full bg-green-500 transition-all"
               style={{
-                width: `${
-                  (uiState.steps.filter((s) => s.status === 'DONE').length /  
+                width: `${(uiState.steps.filter((s) => s.status === 'DONE').length /
                     uiState.steps.length) *
                   100
-                }%`,
+                  }%`,
               }}
             />
           </div>

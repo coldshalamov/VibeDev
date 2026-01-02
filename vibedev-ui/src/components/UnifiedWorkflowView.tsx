@@ -57,6 +57,27 @@ export function UnifiedWorkflowView({ phase }: Props) {
         };
     });
 
+    // Reload flow when phase changes
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem(storageKey);
+            if (saved) {
+                try {
+                    setFlow(JSON.parse(saved));
+                    return;
+                } catch { }
+            }
+        }
+        // If no saved flow, create a new empty one for this phase
+        const phaseInfo = phase ? PHASE_LABELS[phase] : null;
+        setFlow({
+            ...DEFAULT_FLOW,
+            name: phaseInfo?.title || uiState?.job?.title || 'Workflow',
+            description: phaseInfo?.description || uiState?.job?.goal || '',
+        });
+    }, [phase, storageKey, uiState]);
+
+    // Save flow when it changes
     useEffect(() => {
         if (currentJobId) {
             localStorage.setItem(storageKey, JSON.stringify(flow));
@@ -76,27 +97,43 @@ export function UnifiedWorkflowView({ phase }: Props) {
     }
 
     return (
-        <div className="h-full flex">
-            {/* Main Editor */}
-            <div className="flex-1">
-                <HorizontalStepFlow flow={flow} onChange={setFlow} />
-            </div>
-
-            {/* Global Context Sidebar */}
-            <div className="w-72 border-l border-white/5 bg-card/30 flex flex-col">
-                <div className="p-3 border-b border-white/5">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                        Global Context
-                    </h3>
-                    <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                        Injected into every prompt
-                    </p>
+        <div className="h-full flex flex-col">
+            {/* Phase Header */}
+            {phase && (
+                <div className="px-6 py-3 border-b border-white/5 bg-card/50">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-lg font-bold text-primary">{PHASE_LABELS[phase].title} Workflow</h2>
+                            <p className="text-xs text-muted-foreground mt-0.5">{PHASE_LABELS[phase].description}</p>
+                        </div>
+                        <div className="text-[10px] font-mono text-muted-foreground/50 bg-black/20 px-2 py-1 rounded border border-white/5">
+                            Phase {['research', 'planning', 'execution', 'review'].indexOf(phase) + 1}/4
+                        </div>
+                    </div>
                 </div>
-                <div className="flex-1 p-3">
-                    <textarea
-                        value={flow.globalContext}
-                        onChange={(e) => setFlow({ ...flow, globalContext: e.target.value })}
-                        placeholder={`Repo: ${uiState.job.repo_root || '/path/to/repo'}
+            )}
+
+            <div className="flex-1 flex">
+                {/* Main Editor */}
+                <div className="flex-1">
+                    <HorizontalStepFlow flow={flow} onChange={setFlow} />
+                </div>
+
+                {/* Global Context Sidebar */}
+                <div className="w-72 border-l border-white/5 bg-card/30 flex flex-col">
+                    <div className="p-3 border-b border-white/5">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                            Global Context
+                        </h3>
+                        <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                            Injected into every prompt
+                        </p>
+                    </div>
+                    <div className="flex-1 p-3">
+                        <textarea
+                            value={flow.globalContext}
+                            onChange={(e) => setFlow({ ...flow, globalContext: e.target.value })}
+                            placeholder={`Repo: ${uiState.job.repo_root || '/path/to/repo'}
 
 Files:
 - src/
@@ -105,8 +142,9 @@ Files:
 Invariants:
 - Don't break tests
 - Follow code style`}
-                        className="w-full h-full bg-black/30 border border-white/10 rounded-lg p-2 text-[11px] font-mono resize-none focus:border-primary/40 focus:outline-none"
-                    />
+                            className="w-full h-full bg-black/30 border border-white/10 rounded-lg p-2 text-[11px] font-mono resize-none focus:border-primary/40 focus:outline-none"
+                        />
+                    </div>
                 </div>
             </div>
         </div>
