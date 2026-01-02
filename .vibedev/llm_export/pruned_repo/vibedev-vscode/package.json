@@ -1,0 +1,125 @@
+{
+  "name": "vibedev-vscode",
+  "displayName": "VibeDev Mission Control",
+  "description": "Autonomous development workflow automation for Claude Code",
+  "version": "0.1.0",
+  "publisher": "vibedev",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "vibedev.nextStep",
+        "title": "VibeDev: Next Step",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "vibedev.startAutoprompt",
+        "title": "VibeDev: Start Autoprompt",
+        "icon": "$(play)"
+      },
+      {
+        "command": "vibedev.stopAutoprompt",
+        "title": "VibeDev: Stop Autoprompt",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "vibedev.submitEvidence",
+        "title": "VibeDev: Submit Evidence"
+      },
+      {
+        "command": "vibedev.openDashboard",
+        "title": "VibeDev: Open Web Dashboard"
+      },
+      {
+        "command": "vibedev.refreshStatus",
+        "title": "VibeDev: Refresh Status",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vibedev-sidebar",
+          "title": "VibeDev",
+          "icon": "media/vibedev-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "vibedev-sidebar": [
+        {
+          "type": "webview",
+          "id": "vibedev.missionControl",
+          "name": "Mission Control"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "VibeDev",
+      "properties": {
+        "vibedev.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8765",
+          "description": "VibeDev MCP HTTP server URL (run `vibedev-mcp serve`)"
+        },
+        "vibedev.dashboardUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "VibeDev Studio web UI URL"
+        },
+        "vibedev.autoprompt.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable autoprompt automation"
+        },
+        "vibedev.autoprompt.autoSend": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically send prompts (vs paste only)"
+        },
+        "vibedev.autoprompt.delayMs": {
+          "type": "number",
+          "default": 1000,
+          "description": "Delay between steps in milliseconds"
+        },
+        "vibedev.autoprompt.pauseOnDiagnose": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pause autoprompt when entering diagnose mode"
+        },
+        "vibedev.completionMarker": {
+          "type": "string",
+          "default": "✓ VD_READY",
+          "description": "Marker to detect response completion"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.40.0",
+    "typescript": "^5.3.0",
+    "vsce": "^2.15.0"
+  },
+  "dependencies": {}
+}

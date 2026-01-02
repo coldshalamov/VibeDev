@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 
+.vibedev/
 *.sqlite3
 
 .DS_Store
@@ -20,4 +21,3 @@ vibedev-ui/.vite/
 vibedev-vscode/node_modules/
 vibedev-vscode/dist/
 vibedev-vscode/*.vsix
-.vibedev/llm_export/pruned_repo.zip

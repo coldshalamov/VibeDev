@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibedev-mcp"
+version = "0.1.0"
+description = "VibeDev MCP server: a persistent process brain and prompt-chain conductor"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "aiosqlite>=0.20.0",
+  "fastapi>=0.110.0",
+  "mcp[cli]>=1.12.0",
+  "pydantic>=2.8.0",
+  "uvicorn>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27.0",
+  "pytest>=9.0.0",
+  "pytest-asyncio>=1.3.0",
+]
+
+[project.scripts]
+vibedev-mcp = "vibedev_mcp.server:main"
+vibedev = "vibedev_mcp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]

@@ -1,0 +1,36 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Glassmorphic background circle -->
+  <circle cx="64" cy="64" r="58" fill="url(#glass-gradient)" opacity="0.2"/>
+
+  <!-- Main icon - stylized "V" with circuit pattern -->
+  <path d="M 30 30 L 50 70 L 64 50 L 78 70 L 98 30" stroke="url(#primary-gradient)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Circuit nodes -->
+  <circle cx="30" cy="30" r="5" fill="#6366f1"/>
+  <circle cx="64" cy="50" r="5" fill="#8b5cf6"/>
+  <circle cx="98" cy="30" r="5" fill="#6366f1"/>
+
+  <!-- Mission path line -->
+  <path d="M 64 50 L 64 90" stroke="url(#accent-gradient)" stroke-width="4" stroke-linecap="round" stroke-dasharray="4 4" opacity="0.6"/>
+
+  <!-- Target indicator -->
+  <circle cx="64" cy="90" r="8" fill="none" stroke="#10b981" stroke-width="3"/>
+  <circle cx="64" cy="90" r="3" fill="#10b981"/>
+
+  <!-- Gradient definitions -->
+  <defs>
+    <linearGradient id="glass-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="primary-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#8b5cf6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#6366f1;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="accent-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#10b981;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+</svg>
