@@ -2,9 +2,9 @@
 // VibeDev Main Application
 // =============================================================================
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useVibeDevStore, useViewMode, useTheme } from '@/stores/useVibeDevStore';
-import { useUIState } from '@/hooks/useUIState';
+import { useUIState, useCreateJob } from '@/hooks/useUIState';
 import { useJobEvents } from '@/hooks/useJobEvents';
 import { GlobalSidebar } from '@/components/GlobalSidebar';
 import { MainCanvas } from '@/components/MainCanvas';
@@ -13,6 +13,7 @@ import { ExecutionDashboard } from '@/components/ExecutionDashboard';
 import { AutomationCockpit } from '@/components/AutomationCockpit';
 import { JobSelector } from '@/components/JobSelector';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
+import { UnifiedWorkflowView } from '@/components/UnifiedWorkflowView';
 import { cn } from '@/lib/utils';
 
 function App() {
@@ -106,6 +107,7 @@ function App() {
 
           {/* View Mode Tabs */}
           <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
+            <ViewModeTab mode="workflow" label="Workflow" />
             <ViewModeTab mode="research" label="Research" />
             <ViewModeTab mode="planning" label="Planning" />
             <ViewModeTab mode="execution" label="Execution" />
@@ -122,14 +124,16 @@ function App() {
         <div className="flex-1 overflow-auto">
           {!currentJobId ? (
             <EmptyState />
+          ) : viewMode === 'workflow' ? (
+            <UnifiedWorkflowView />
           ) : viewMode === 'research' ? (
-            <ResearchDashboard />
+            <UnifiedWorkflowView phase="research" />
           ) : viewMode === 'planning' ? (
-            <MainCanvas />
+            <UnifiedWorkflowView phase="planning" />
           ) : viewMode === 'execution' ? (
-            <ExecutionDashboard />
+            <UnifiedWorkflowView phase="execution" />
           ) : (
-            <ReviewView />
+            <UnifiedWorkflowView phase="review" />
           )}
         </div>
       </main>
@@ -141,7 +145,7 @@ function App() {
 // Sub-components
 // =============================================================================
 
-function ViewModeTab({ mode, label }: { mode: 'research' | 'planning' | 'execution' | 'review'; label: string }) {
+function ViewModeTab({ mode, label }: { mode: 'workflow' | 'research' | 'planning' | 'execution' | 'review'; label: string }) {
   const currentMode = useViewMode();
   const setViewMode = useVibeDevStore((state) => state.setViewMode);
 
@@ -161,17 +165,123 @@ function ViewModeTab({ mode, label }: { mode: 'research' | 'planning' | 'executi
 }
 
 function EmptyState() {
+  const [showModal, setShowModal] = useState(false);
+  const [title, setTitle] = useState('');
+  const [goal, setGoal] = useState('');
+  const [repoRoot, setRepoRoot] = useState('');
+  const setCurrentJob = useVibeDevStore((state) => state.setCurrentJob);
+  const createJobMutation = useCreateJob();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || !goal.trim()) return;
+
+    try {
+      const result = await createJobMutation.mutateAsync({
+        title: title.trim(),
+        goal: goal.trim(),
+        repoRoot: repoRoot.trim() || undefined,
+      });
+      setCurrentJob(result.job_id);
+      // Go straight to workflow editor
+      useVibeDevStore.getState().setViewMode('workflow');
+      setShowModal(false);
+      setTitle('');
+      setGoal('');
+      setRepoRoot('');
+    } catch (error) {
+      console.error('Failed to create job:', error);
+    }
+  };
+
   return (
-    <div className="flex h-full items-center justify-center">
-      <div className="text-center">
-        <div className="mb-4 text-6xl">🎯</div>
-        <h2 className="mb-2 text-xl font-semibold">No Job Selected</h2>
-        <p className="text-muted-foreground mb-4">
-          Select an existing job or create a new one to get started.
-        </p>
-        <button className="btn btn-primary">Create New Job</button>
+    <>
+      <div className="flex h-full items-center justify-center">
+        <div className="text-center">
+          <div className="mb-4 text-6xl">🎯</div>
+          <h2 className="mb-2 text-xl font-semibold">No Job Selected</h2>
+          <p className="text-muted-foreground mb-4">
+            Select an existing job or create a new one to get started.
+          </p>
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowModal(true)}
+          >
+            Create New Job
+          </button>
+        </div>
       </div>
-    </div>
+
+      {/* Create Job Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => setShowModal(false)} />
+          <div className="relative w-full max-w-lg glass-panel shadow-2xl animate-fade-in ring-1 ring-white/10 p-1">
+            <div className="bg-card/90 rounded-xl p-6 space-y-6">
+              <div className="space-y-1">
+                <h2 className="text-xl font-bold tracking-tight">Create New Job</h2>
+                <p className="text-sm text-muted-foreground">Define your mission parameters.</p>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Title</label>
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="e.g. Build a SaaS Dashboard App"
+                    className="w-full rounded-lg border border-white/10 bg-black/20 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Goal</label>
+                  <textarea
+                    value={goal}
+                    onChange={(e) => setGoal(e.target.value)}
+                    placeholder="Build a complete React dashboard with user management, data visualization, and real-time updates. Include auth, dark mode, and export functionality."
+                    rows={3}
+                    className="w-full rounded-lg border border-white/10 bg-black/20 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all resize-none"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Repo Path <span className="text-muted-foreground/50 lowercase font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={repoRoot}
+                    onChange={(e) => setRepoRoot(e.target.value)}
+                    placeholder="C:/path/to/repo"
+                    className="w-full rounded-lg border border-white/10 bg-black/20 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(false)}
+                    className="btn btn-ghost"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!title.trim() || !goal.trim() || createJobMutation.isPending}
+                    className="btn btn-primary"
+                  >
+                    {createJobMutation.isPending ? 'Creating...' : 'Create Job'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

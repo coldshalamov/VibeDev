@@ -172,6 +172,8 @@ function CreateJobModal({ onClose }: { onClose: () => void }) {
         repoRoot: repoRoot.trim() || undefined,
       });
       setCurrentJob(result.job_id);
+      // Go straight to workflow editor
+      (await import('@/stores/useVibeDevStore')).useVibeDevStore.getState().setViewMode('workflow');
       onClose();
     } catch (error) {
       console.error('Failed to create job:', error);
@@ -198,7 +200,7 @@ function CreateJobModal({ onClose }: { onClose: () => void }) {
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Refactor Auth System"
+                placeholder="e.g. Build a SaaS Dashboard App"
                 className="w-full rounded-lg border border-white/10 bg-black/20 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50"
                 autoFocus
               />
@@ -209,7 +211,7 @@ function CreateJobModal({ onClose }: { onClose: () => void }) {
               <textarea
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
-                placeholder="Describe the desired end state..."
+                placeholder="Build a complete React dashboard with user management, data visualization, and real-time updates."
                 rows={3}
                 className="w-full rounded-lg border border-white/10 bg-black/20 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50 resize-none"
               />

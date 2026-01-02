@@ -180,32 +180,65 @@ export function ResearchDashboard() {
 
   const createFromTemplate = async (tpl: BlockTemplate) => {
     if (!addMutation) return;
-    const res = await addMutation.mutateAsync({
-      blockType: tpl.blockType,
-      content: tpl.content,
-      tags: tpl.tags,
-    });
-    setSelectedId(res.context_id);
+    try {
+      const res = await addMutation.mutateAsync({
+        blockType: tpl.blockType,
+        content: tpl.content,
+        tags: tpl.tags,
+      });
+      setSelectedId(res.context_id);
+      // Show success feedback
+      const successMsg = document.createElement('div');
+      successMsg.className = 'fixed top-4 right-4 bg-primary/20 border border-primary/40 text-primary px-4 py-2 rounded-lg shadow-lg z-50 animate-in fade-in slide-in-from-top-2 duration-300';
+      successMsg.textContent = `✓ Created ${tpl.label}`;
+      document.body.appendChild(successMsg);
+      setTimeout(() => {
+        successMsg.classList.add('animate-out', 'fade-out', 'slide-out-to-top-2');
+        setTimeout(() => document.body.removeChild(successMsg), 300);
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to create block:', err);
+      alert(`Failed to create ${tpl.label}. Check console for details.`);
+    }
   };
 
   const saveSelected = async () => {
     if (!updateMutation || !selectedId) return;
-    await updateMutation.mutateAsync({
-      contextId: selectedId,
-      patch: {
-        block_type: draftType,
-        content: draftContent,
-        tags: parseTags(draftTags),
-      },
-    });
+    try {
+      await updateMutation.mutateAsync({
+        contextId: selectedId,
+        patch: {
+          block_type: draftType,
+          content: draftContent,
+          tags: parseTags(draftTags),
+        },
+      });
+      // Show success feedback
+      const successMsg = document.createElement('div');
+      successMsg.className = 'fixed top-4 right-4 bg-green-500/20 border border-green-500/40 text-green-300 px-4 py-2 rounded-lg shadow-lg z-50 animate-in fade-in slide-in-from-top-2 duration-300';
+      successMsg.textContent = '✓ Block saved';
+      document.body.appendChild(successMsg);
+      setTimeout(() => {
+        successMsg.classList.add('animate-out', 'fade-out', 'slide-out-to-top-2');
+        setTimeout(() => document.body.removeChild(successMsg), 300);
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to save block:', err);
+      alert('Failed to save block. Check console for details.');
+    }
   };
 
   const deleteSelected = async () => {
     if (!deleteMutation || !selectedId) return;
     const ok = window.confirm('Delete this block? This cannot be undone.');
     if (!ok) return;
-    await deleteMutation.mutateAsync(selectedId);
-    setSelectedId(null);
+    try {
+      await deleteMutation.mutateAsync(selectedId);
+      setSelectedId(null);
+    } catch (err) {
+      console.error('Failed to delete block:', err);
+      alert('Failed to delete block. Check console for details.');
+    }
   };
 
   const saveCheckpointPolicy = async () => {
@@ -258,6 +291,11 @@ export function ResearchDashboard() {
                 templates
               </div>
             </div>
+            <div className="px-3 pt-2 pb-3">
+              <div className="bg-primary/10 border border-primary/20 rounded-lg p-2 text-[10px] text-primary/90 leading-relaxed">
+                <strong>💡 How to use:</strong> Click a template below to create a new block. It will appear in the Knowledge Base, where you can select and edit it.
+              </div>
+            </div>
             <div className="p-3 space-y-4 max-h-56 overflow-y-auto custom-scrollbar">
               {groupedTemplates.map((group) => (
                 <div key={group.title} className="space-y-2">
@@ -273,12 +311,12 @@ export function ResearchDashboard() {
                         className={cn(
                           'text-left rounded-xl border border-white/5 bg-white/5 hover:bg-white/10',
                           'transition-all duration-300 p-3 shadow-[0_0_0_rgba(59,130,246,0)] hover:shadow-[0_0_15px_rgba(59,130,246,0.12)]',
-                          'active:scale-[0.99]'
+                          'active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed'
                         )}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="font-semibold text-sm text-white/90 truncate">
-                            {t.label}
+                            {addMutation?.isPending ? '⏳ Creating...' : t.label}
                           </div>
                           <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-mono">
                             {t.blockType}

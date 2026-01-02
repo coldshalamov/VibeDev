@@ -11,7 +11,7 @@ import type { UIState, JobStatus } from '@/types';
 // =============================================================================
 
 interface ViewMode {
-  mode: 'research' | 'planning' | 'execution' | 'review';
+  mode: 'workflow' | 'research' | 'planning' | 'execution' | 'review';
 }
 
 interface SidebarState {
@@ -98,7 +98,7 @@ export const useVibeDevStore = create<VibeDevState>()(
         currentJobId: null,
         uiState: null,
 
-        viewMode: { mode: 'planning' },
+        viewMode: { mode: 'workflow' },
         sidebar: {
           isOpen: true,
           activeSection: 'metadata',
