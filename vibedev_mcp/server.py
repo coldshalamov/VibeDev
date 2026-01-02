@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import json
 import sys
 import os
 from contextlib import asynccontextmanager
@@ -1116,6 +1118,30 @@ async def repo_hygiene_suggest(params: RepoHygieneSuggestInput, ctx: Context) ->
     return await store.repo_hygiene_suggest(job_id=params.job_id, max_suggestions=params.max_suggestions)
 
 
+def _openapi_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="vibedev-mcp openapi")
+    parser.add_argument(
+        "--out",
+        help="Write OpenAPI JSON to this file (defaults to stdout).",
+    )
+    args = parser.parse_args(argv)
+
+    from pathlib import Path
+
+    from vibedev_mcp.http_server import create_app
+
+    app = create_app()
+    payload = app.openapi()
+    text = json.dumps(payload, indent=2, sort_keys=True)
+
+    if args.out:
+        Path(args.out).write_text(text + "\n", encoding="utf-8")
+        return 0
+
+    sys.stdout.write(text + "\n")
+    return 0
+
+
 def main() -> None:
     argv = sys.argv[1:]
     if argv and argv[0] == "serve":
@@ -1123,6 +1149,9 @@ def main() -> None:
 
         serve_main(argv[1:])
         return
+
+    if argv and argv[0] == "openapi":
+        raise SystemExit(_openapi_main(argv[1:]))
 
     mcp.run()
 

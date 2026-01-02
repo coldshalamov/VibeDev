@@ -58,6 +58,13 @@ class AnswersInput(BaseModel):
     answers: dict[str, Any] = Field(default_factory=dict)
 
 
+class HealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
+    error: str | None = None
+
+
 class DeliverablesInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     deliverables: list[str] = Field(default_factory=list)
@@ -170,18 +177,18 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
     def store_from(request: Request) -> VibeDevStore:
         return request.app.state.store
 
-    @app.get("/health")
-    async def health(request: Request) -> dict[str, Any]:
+    @app.get("/health", response_model=HealthResponse)
+    async def health(request: Request) -> HealthResponse:
         """Basic liveness check (including DB connectivity)."""
         store = store_from(request)
         try:
             await store.ping()
-            return {"ok": True}
+            return HealthResponse(ok=True)
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            return HealthResponse(ok=False, error=str(e))
 
-    @app.get("/api/health")
-    async def api_health(request: Request) -> dict[str, Any]:
+    @app.get("/api/health", response_model=HealthResponse)
+    async def api_health(request: Request) -> HealthResponse:
         return await health(request)
 
     # ------------------------------------------------------------------------- 

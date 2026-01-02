@@ -29,7 +29,7 @@ export function ConnectionStatus({
           setDetail(null);
         } else {
           setStatus('offline');
-          setDetail(res.error ?? null);
+          setDetail(res.error != null ? String(res.error) : null);
         }
       } catch (e) {
         if (!isMounted) return;

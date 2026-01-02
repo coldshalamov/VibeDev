@@ -9,12 +9,16 @@ import type {
   SubmitResult,
   PlanningQuestion,
 } from '@/types';
+import type { paths } from '@/generated/openapi';
 
 export type TemplateSummary = {
   template_id: string;
   title: string;
   description: string;
 };
+
+type HealthResponse =
+  paths['/api/health']['get']['responses']['200']['content']['application/json'];
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL ?? '';
 const API_PREFIX = (import.meta as any).env?.VITE_API_PREFIX ?? '/api';
@@ -48,7 +52,7 @@ async function request<T>(
   return response.json();
 }
 
-export async function getHealth(): Promise<{ ok: boolean; error?: string }> {
+export async function getHealth(): Promise<HealthResponse> {
   return request(`/health`);
 }
 

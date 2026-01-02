@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "vibedev": {
+      "command": "vibedev-mcp",
+      "args": [],
+      "env": {
+        "VIBEDEV_DB_PATH": "/home/<you>/.vibedev/vibedev.sqlite3"
+      }
+    }
+  }
+}
+

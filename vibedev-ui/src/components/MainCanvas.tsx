@@ -2,7 +2,7 @@
 // Main Canvas Component - Planning Mode Step Editor
 // =============================================================================
 
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useVibeDevStore } from '@/stores/useVibeDevStore';
 import {
   useNextQuestions,
@@ -108,7 +108,7 @@ function PlanningInterviewSection({
     );
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
     for (const q of questions) {

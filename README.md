@@ -13,6 +13,7 @@ Why it exists:
 - `docs/03_gates_and_evidence.md` — gate catalog + evidence schema
 - `docs/05_studio_ui_spec.md` — the GUI (“Studio”) spec
 - `docs/07_doc_map.md` — where every concept lives
+- `docs/agent_setup.md` — install + agent/client MCP setup templates
 
 For LLM usage rules in this repo, read `CLAUDE.md`.
 
@@ -82,6 +83,7 @@ are enforced as **opt-in** and **allowlisted** per job:
 ## Contributing
 
 - Run tests: `python -m pytest -v`
+- Update generated API types (if you change HTTP models/endpoints): `cd vibedev-ui` then `npm run gen:api`
 - Keep diffs small and evidence-driven (see `CLAUDE.md`).
 
 ---

@@ -39,3 +39,34 @@ jobs:
       - name: Build
         run: npm run build
 
+  api-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install backend (for vibedev-mcp)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vibedev-ui/package-lock.json
+
+      - name: Install UI
+        working-directory: vibedev-ui
+        run: npm ci
+
+      - name: Regenerate OpenAPI + TS types
+        working-directory: vibedev-ui
+        run: npm run gen:api
+
+      - name: Check generated files are up to date
+        run: git diff --exit-code vibedev-ui/src/generated

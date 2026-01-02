@@ -27,6 +27,7 @@ This table is the “index” for the planning documentation. It is designed so 
 | Compilation surface concept | docs/00_overview.md | ## Compilation Surface |  
 | LLM operating manual (repo rules) | CLAUDE.md | ## 0) What You Are Building (One Sentence) |
 | User-facing quick start | README.md | ## Quick start |
+| Agent setup (MCP client configs) | docs/agent_setup.md | # Agent Setup (Universal MCP) |
 | Legacy spec (historical) | docs/spec.md | # Legacy Spec (Historical) |
 | Legacy GUI notes (historical) | docs/gui_spec.md | # VibeDev GUI: The "Glass Box" Development Command Center |
 | High-level roadmap | docs/roadmap.md | ## Roadmap (Next) |
