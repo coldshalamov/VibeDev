@@ -5,6 +5,21 @@ import tempfile
 from fastapi.testclient import TestClient
 
 
+def test_http_health_endpoints():
+    from vibedev_mcp.http_server import create_app
+
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        db_path = os.path.join(tmp_dir, "vibedev.sqlite3")
+        app = create_app(db_path=db_path)
+
+        with TestClient(app) as client:
+            assert client.get("/health").json()["ok"] is True
+            assert client.get("/api/health").json()["ok"] is True
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def test_http_full_workflow_smoke():
     from vibedev_mcp.http_server import create_app
 

@@ -170,9 +170,23 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
     def store_from(request: Request) -> VibeDevStore:
         return request.app.state.store
 
-    # -------------------------------------------------------------------------
+    @app.get("/health")
+    async def health(request: Request) -> dict[str, Any]:
+        """Basic liveness check (including DB connectivity)."""
+        store = store_from(request)
+        try:
+            await store.ping()
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/health")
+    async def api_health(request: Request) -> dict[str, Any]:
+        return await health(request)
+
+    # ------------------------------------------------------------------------- 
     # Jobs
-    # -------------------------------------------------------------------------
+    # ------------------------------------------------------------------------- 
 
     @app.get("/api/templates")
     async def templates(request: Request) -> dict[str, Any]:

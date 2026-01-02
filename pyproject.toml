@@ -25,6 +25,7 @@ dev = [
 
 [project.scripts]
 vibedev-mcp = "vibedev_mcp.server:main"
+vibedev = "vibedev_mcp.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

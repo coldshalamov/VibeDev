@@ -11,6 +11,7 @@ import { MainCanvas } from '@/components/MainCanvas';
 import { ExecutionDashboard } from '@/components/ExecutionDashboard';
 import { AutomationCockpit } from '@/components/AutomationCockpit';
 import { JobSelector } from '@/components/JobSelector';
+import { ConnectionStatus } from '@/components/ConnectionStatus';
 import { cn } from '@/lib/utils';
 
 function App() {
@@ -58,6 +59,9 @@ function App() {
         <div className="text-center">
           <p className="text-destructive mb-2">Error loading job</p>
           <p className="text-sm text-muted-foreground">{(error as Error).message}</p>
+          <div className="mt-4 flex justify-center">
+            <ConnectionStatus />
+          </div>
         </div>
       </div>
     );
@@ -106,7 +110,10 @@ function App() {
             <ViewModeTab mode="review" label="Review" />
           </div>
 
-          <AutomationCockpit compact />
+          <div className="flex items-center gap-3">
+            <ConnectionStatus />
+            <AutomationCockpit compact />
+          </div>
         </header>
 
         {/* Content based on view mode */}

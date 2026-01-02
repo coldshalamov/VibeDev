@@ -48,6 +48,10 @@ async function request<T>(
   return response.json();
 }
 
+export async function getHealth(): Promise<{ ok: boolean; error?: string }> {
+  return request(`/health`);
+}
+
 // =============================================================================
 // Job Operations
 // =============================================================================

@@ -33,6 +33,9 @@ Prereqs: Python 3.11+
 
 - `vibedev-mcp serve` (defaults to `127.0.0.1:8765`)
 
+Health check:
+- `curl http://127.0.0.1:8765/api/health`
+
 ### 3) Run the GUI (local)
 
 - Terminal 1: `vibedev-mcp serve`
@@ -51,6 +54,13 @@ Prereqs: Python 3.11+
 - UI: `get_ui_state` (and `/api/jobs/{job_id}/ui-state` via HTTP)
 - Memory: `context_*`, `mistake_*`, `devlog_*`
 - Repo helpers: `repo_snapshot`, `repo_map_export`, `repo_find_stale_candidates`, `repo_hygiene_suggest`, `git_*`
+
+## Runner (optional)
+
+For a minimal “hands” loop outside the UI (read/write evidence JSON and drive a
+job forward), use the runner CLI:
+
+- `vibedev runner --job <JOB_ID> --evidence path\\to\\evidence.json`
 
 ## Workflow templates (best-practice defaults)
 

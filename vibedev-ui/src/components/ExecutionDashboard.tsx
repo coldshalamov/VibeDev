@@ -556,7 +556,7 @@ function SubmitResultForm({
   let parsedObj: any = {};
   try {
     parsedObj = JSON.parse(evidence || '{}');
-  } catch (e) {
+  } catch {
     // ignore
   }
 

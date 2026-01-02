@@ -89,6 +89,8 @@ class VibeDevStore:
 
         conn = await aiosqlite.connect(db_path)
         conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA journal_mode = WAL;")
+        await conn.execute("PRAGMA busy_timeout = 5000;")
         await conn.execute("PRAGMA foreign_keys = ON;")
 
         store = cls(db_path=db_path, conn=conn)
@@ -97,6 +99,11 @@ class VibeDevStore:
 
     async def close(self) -> None:
         await self._conn.close()
+
+    async def ping(self) -> None:
+        """Raise if the underlying DB connection is not usable."""
+        async with self._conn.execute("SELECT 1;") as cursor:
+            await cursor.fetchone()
 
     async def _init_schema(self) -> None:
         await self._conn.executescript(
