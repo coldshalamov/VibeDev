@@ -130,12 +130,12 @@ async def _status_job(*, job_id: str) -> int:
     store = await VibeDevStore.open(db_path)
     try:
         try:
-            job = await store.job_get(job_id)
+            job = await store.get_job(job_id)
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
 
-        steps = await store.job_list_steps(job_id)
+        steps = await store.get_steps(job_id)
 
         # Header
         print(f"\n{'='*60}")
@@ -181,7 +181,7 @@ async def _status_job(*, job_id: str) -> int:
             print(f"Attempts: {current.get('attempt_count', 0)}")
 
         # Mistakes
-        mistakes = await store.mistake_list(job_id)
+        mistakes = await store.mistake_list(job_id=job_id)
         if mistakes:
             print(f"\n⚠️  Recorded Mistakes: {len(mistakes)}")
             for m in mistakes[:3]:  # Show first 3
@@ -198,7 +198,8 @@ async def _list_jobs(*, status_filter: str | None, limit: int) -> int:
     db_path = Path(os.environ.get("VIBEDEV_DB_PATH", str(_default_db_path())))
     store = await VibeDevStore.open(db_path)
     try:
-        jobs = await store.job_list(status=status_filter, limit=limit)
+        result = await store.job_list(status=status_filter, limit=limit)
+        jobs = result.get("items", [])
 
         if not jobs:
             print("No jobs found.")

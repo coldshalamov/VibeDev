@@ -723,20 +723,42 @@ function DynamicEvidenceForm({
 }
 
 function ActivityLogPanel({ logs }: { logs: any[] }) {
+  const [filter, setFilter] = useState('');
+
+  const filteredLogs = useMemo(() => {
+    if (!filter) return logs;
+    const q = filter.toLowerCase();
+    return logs?.filter(l =>
+      l.content?.toLowerCase().includes(q) ||
+      formatDate(l.created_at).toLowerCase().includes(q)
+    );
+  }, [logs, filter]);
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full uppercase">
+      <div className="mb-3">
+        <input
+          type="text"
+          placeholder="Filter logs..."
+          className="w-full bg-black/40 border border-white/5 rounded-md px-3 py-1.5 text-[10px] font-mono focus:ring-1 focus:ring-primary/40 focus:outline-none transition-all"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+      </div>
       <div className="flex-1 overflow-auto space-y-3 mb-4 custom-scrollbar pr-2">
-        {logs?.length === 0 ? (
+        {filteredLogs?.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-8 opacity-50">
-            Awaiting telemetry data...
+            {filter ? 'No matching logs' : 'Awaiting telemetry data...'}
           </p>
         ) : (
-          logs?.map((log, i) => (
+          filteredLogs?.map((log, i) => (
             <div
               key={i}
-              className="p-2.5 rounded-lg bg-white/5 border border-white/5 text-xs font-mono leading-relaxed"
+              className="p-2.5 rounded-lg bg-white/5 border border-white/5 text-xs font-mono leading-relaxed group hover:bg-white/[0.07] transition-colors"
             >
-              <div className="text-[10px] text-primary/70 mb-1 opacity-70">{formatDate(log.created_at)}</div>
+              <div className="text-[10px] text-primary/70 mb-1 opacity-70 group-hover:opacity-100 transition-opacity">
+                {formatDate(log.created_at)}
+              </div>
               <p className="text-gray-300 whitespace-pre-wrap">{log.content}</p>
             </div>
           ))

@@ -2,7 +2,7 @@
 // Main Canvas Component - Planning Mode Step Editor
 // =============================================================================
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useVibeDevStore } from '@/stores/useVibeDevStore';
 import {
   useNextQuestions,
@@ -51,12 +51,18 @@ export function MainCanvas() {
     <div className="h-full overflow-auto p-6">
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Phase-based content */}
-        {!phase.is_complete ? (
+        {!phase.is_complete && (
           <PlanningInterviewSection jobId={currentJobId} phase={phase} />
-        ) : steps.length === 0 ? (
+        )}
+
+        {steps.length === 0 ? (
           <StepCreationSection jobId={currentJobId} />
         ) : (
-          <StepListSection steps={steps} jobId={currentJobId} />
+          <StepListSection
+            steps={steps}
+            jobId={currentJobId}
+            flowState={uiState.flow_state}
+          />
         )}
 
         {/* Ready transition button */}
@@ -235,16 +241,16 @@ import FlowCanvas from './FlowCanvas';
 import { QueueListIcon, Squares2X2Icon } from '@heroicons/react/24/outline'; // Start expecting Heroicons
 
 function StepCreationSection({ jobId }: { jobId: string }) {
-  const [viewMode, setViewMode] = useState<'list' | 'canvas'>('canvas');
-  const [steps, setSteps] = useState<
-    Array<{
-      id: string;
-      title: string;
-      instruction_prompt: string;
-      acceptance_criteria: string;
-      required_evidence: string;
-    }>
-  >([
+  const [viewMode, setViewMode] = useState<'list' | 'canvas'>('canvas');        
+  type StepDraft = {
+    id: string;
+    title: string;
+    instruction_prompt: string;
+    acceptance_criteria: string;
+    required_evidence: string;
+  };
+
+  const [steps, setSteps] = useState<StepDraft[]>([
     {
       id: 'init-1',
       title: '',
@@ -349,7 +355,16 @@ function StepCreationSection({ jobId }: { jobId: string }) {
       </div>
 
       {viewMode === 'canvas' ? (
-        <FlowCanvas jobId={jobId} />
+        <FlowCanvas
+          jobId={jobId}
+          initialSteps={steps}
+          onStepsChange={(newSteps: StepDraft[]) => {
+            // Only update if meaningfully different to avoid loops
+            if (JSON.stringify(newSteps) !== JSON.stringify(steps)) {
+              setSteps(newSteps);
+            }
+          }}
+        />
       ) : (
         <div className="panel animate-fade-in">
           <div className="panel-header">
@@ -414,19 +429,73 @@ function StepCreationSection({ jobId }: { jobId: string }) {
 function StepListSection({
   steps,
   jobId,
+  flowState,
 }: {
   steps: any[];
   jobId: string;
+  flowState?: any;
 }) {
   const [viewMode, setViewMode] = useState<'list' | 'canvas'>('canvas');
+  const [localSteps, setLocalSteps] = useState(steps);
   const selectedStepIds = useVibeDevStore((state) => state.selectedStepIds);
   const toggleStepSelection = useVibeDevStore((state) => state.toggleStepSelection);
+  const proposeStepsMutation = useProposeSteps(jobId);
+
+  // Keep localSteps in sync with props when props change radically (e.g. from backend)
+  useEffect(() => {
+    setLocalSteps(steps);
+  }, [steps]);
+
+  const hasChanges = useMemo(() => {
+    if (localSteps.length !== steps.length) return true;
+    return localSteps.some((s, i) => s.step_id !== steps[i].step_id);
+  }, [localSteps, steps]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setLocalSteps((items) => {
+        const oldIndex = items.findIndex((i) => i.step_id === active.id);
+        const newIndex = items.findIndex((i) => i.step_id === over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
+
+  const handleSaveOrder = async () => {
+    const validNodes = localSteps.map((s) => ({
+      step_id: s.step_id,
+      title: s.title,
+      instruction_prompt: s.instruction_prompt,
+      acceptance_criteria: s.acceptance_criteria || [],
+      required_evidence: s.required_evidence || [],
+    }));
+
+    await proposeStepsMutation.mutateAsync(validNodes);
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Execution Plan</h2>
         <div className="flex items-center gap-3">
+          {hasChanges && (
+            <button
+              onClick={handleSaveOrder}
+              disabled={proposeStepsMutation.isPending}
+              className="btn btn-primary text-xs py-1"
+            >
+              {proposeStepsMutation.isPending ? 'Saving...' : 'Save New Order'}
+            </button>
+          )}
           <span className="text-sm text-muted-foreground">{steps.length} steps</span>
           <div className="flex bg-muted rounded-lg p-1 border border-white/5">
             <button
@@ -456,20 +525,62 @@ function StepListSection({
       </div>
 
       {viewMode === 'canvas' ? (
-        <FlowCanvas jobId={jobId} initialSteps={steps} />
+        <FlowCanvas jobId={jobId} initialSteps={steps} initialGraphState={flowState} />
       ) : (
-        <div className="space-y-3">
-          {steps.map((step, index) => (
-            <StepCard
-              key={step.step_id}
-              step={step}
-              index={index}
-              isSelected={selectedStepIds.includes(step.step_id)}
-              onToggleSelect={() => toggleStepSelection(step.step_id)}
-            />
-          ))}
-        </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={localSteps.map((s) => s.step_id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-3">
+              {localSteps.map((step, index) => (
+                <SortableStepCard
+                  key={step.step_id}
+                  id={step.step_id}
+                  step={step}
+                  index={index}
+                  isSelected={selectedStepIds.includes(step.step_id)}
+                  onToggleSelect={() => toggleStepSelection(step.step_id)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       )}
+    </div>
+  );
+}
+
+function SortableStepCard(props: any) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: props.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 1000 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <div className="flex items-center gap-2">
+        <div {...attributes} {...listeners} className="cursor-grab p-1 hover:bg-white/5 rounded">
+          <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </div>
+        <div className="flex-1">
+          <StepCard {...props} />
+        </div>
+      </div>
     </div>
   );
 }

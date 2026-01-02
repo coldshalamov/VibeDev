@@ -17,14 +17,17 @@ export function useJobEvents(jobId: string | null) {
     es.onmessage = (event) => {
       try {
         const parsed = JSON.parse(event.data) as { type: string };
-        if (parsed.type === 'job_updated' || parsed.type === 'phase_changed') {
+        if (parsed.type === 'job_updated' || parsed.type === 'phase_changed') { 
           queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
-          queryClient.invalidateQueries({ queryKey: queryKeys.jobsList() });
+          queryClient.invalidateQueries({ queryKey: queryKeys.jobsList() });    
+          queryClient.invalidateQueries({ queryKey: ['jobs', jobId, 'context'] });
         } else {
           queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
+          queryClient.invalidateQueries({ queryKey: ['jobs', jobId, 'context'] });
         }
       } catch {
-        queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });  
+        queryClient.invalidateQueries({ queryKey: ['jobs', jobId, 'context'] });
       }
     };
 
@@ -35,4 +38,3 @@ export function useJobEvents(jobId: string | null) {
     return () => es.close();
   }, [jobId, queryClient]);
 }
-

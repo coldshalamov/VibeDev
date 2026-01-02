@@ -17,6 +17,23 @@ export type TemplateSummary = {
   description: string;
 };
 
+export type ContextBlockSummary = {
+  context_id: string;
+  block_type: string;
+  tags: string[];
+  created_at: string;
+  excerpt: string;
+};
+
+export type ContextBlock = {
+  context_id: string;
+  job_id: string;
+  block_type: string;
+  content: string;
+  tags: string[];
+  created_at: string;
+};
+
 type HealthResponse =
   paths['/api/health']['get']['responses']['200']['content']['application/json'];
 
@@ -69,6 +86,16 @@ export async function getUIState(jobId: string): Promise<UIState> {
   return request(`/jobs/${jobId}/ui-state`);
 }
 
+export async function saveUIState(
+  jobId: string,
+  graphState: unknown
+): Promise<{ ok: boolean }> {
+  return request(`/jobs/${jobId}/ui-state`, {
+    method: 'POST',
+    body: JSON.stringify({ graph_state: graphState }),
+  });
+}
+
 export async function createJob(
   title: string,
   goal: string,
@@ -77,11 +104,22 @@ export async function createJob(
 ): Promise<{ job_id: string; questions: PlanningQuestion[] }> {
   return request('/jobs', {
     method: 'POST',
-    body: JSON.stringify({ title, goal, repo_root: repoRoot, policies }),
+    body: JSON.stringify({ title, goal, repo_root: repoRoot, policies }),       
   });
 }
 
-export async function archiveJob(jobId: string): Promise<{ ok: boolean }> {
+export async function updateJobPolicies(
+  jobId: string,
+  update: Record<string, unknown>,
+  merge: boolean = true
+): Promise<{ ok: boolean; job: unknown }> {
+  return request(`/jobs/${jobId}/policies`, {
+    method: 'PATCH',
+    body: JSON.stringify({ update, merge }),
+  });
+}
+
+export async function archiveJob(jobId: string): Promise<{ ok: boolean }> {     
   return request(`/jobs/${jobId}/archive`, { method: 'POST' });
 }
 
@@ -226,7 +264,7 @@ export async function refineSteps(
 // Execution Operations
 // =============================================================================
 
-export async function getNextStepPrompt(jobId: string): Promise<StepPrompt> {   
+export async function getNextStepPrompt(jobId: string): Promise<StepPrompt> {
   return request(`/jobs/${jobId}/step-prompt`);
 }
 
@@ -269,9 +307,37 @@ export async function addContextBlock(
 
 export async function searchContext(
   jobId: string,
-  query: string
-): Promise<{ results: unknown[] }> {
-  return request(`/jobs/${jobId}/context/search?q=${encodeURIComponent(query)}`);
+  query: string,
+  limit: number = 100
+): Promise<{ results: ContextBlockSummary[] }> {
+  return request(
+    `/jobs/${jobId}/context/search?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`
+  );
+}
+
+export async function getContextBlock(
+  jobId: string,
+  contextId: string
+): Promise<ContextBlock> {
+  return request(`/jobs/${jobId}/context/${contextId}`);
+}
+
+export async function updateContextBlock(
+  jobId: string,
+  contextId: string,
+  patch: { block_type?: string; content?: string; tags?: string[] }
+): Promise<{ ok: boolean; block: ContextBlock }> {
+  return request(`/jobs/${jobId}/context/${contextId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteContextBlock(
+  jobId: string,
+  contextId: string
+): Promise<{ ok: boolean }> {
+  return request(`/jobs/${jobId}/context/${contextId}`, { method: 'DELETE' });
 }
 
 // =============================================================================
@@ -381,7 +447,7 @@ export async function createRepoSnapshot(
 
 export async function exportJob(
   jobId: string,
-  format: 'json' | 'md'
-): Promise<{ format: string; content?: string; job?: unknown }> {
+  format: 'json' | 'md' = 'md'
+): Promise<{ format: 'json' | 'md'; content?: string; job?: unknown; steps?: unknown[] }> {
   return request(`/jobs/${jobId}/export?format=${format}`);
 }

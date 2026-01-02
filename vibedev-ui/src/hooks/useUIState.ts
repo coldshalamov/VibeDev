@@ -16,11 +16,15 @@ export const queryKeys = {
   job: (jobId: string) => ['jobs', jobId] as const,
   uiState: (jobId: string) => ['jobs', jobId, 'ui-state'] as const,
   questions: (jobId: string) => ['jobs', jobId, 'questions'] as const,
-  stepPrompt: (jobId: string) => ['jobs', jobId, 'step-prompt'] as const,
+  stepPrompt: (jobId: string) => ['jobs', jobId, 'step-prompt'] as const,       
   devlog: (jobId: string) => ['jobs', jobId, 'devlog'] as const,
-  gitStatus: (jobId: string) => ['jobs', jobId, 'git', 'status'] as const,
+  gitStatus: (jobId: string) => ['jobs', jobId, 'git', 'status'] as const,      
   gitLog: (jobId: string) => ['jobs', jobId, 'git', 'log'] as const,
-  repoHygiene: (jobId: string) => ['jobs', jobId, 'repo', 'hygiene'] as const,
+  repoHygiene: (jobId: string) => ['jobs', jobId, 'repo', 'hygiene'] as const,  
+  contextSearch: (jobId: string, query: string) =>
+    ['jobs', jobId, 'context', 'search', query] as const,
+  contextBlock: (jobId: string, contextId: string) =>
+    ['jobs', jobId, 'context', 'block', contextId] as const,
 };
 
 // =============================================================================
@@ -124,6 +128,73 @@ export function useRepoHygiene(jobId: string | null) {
     },
     enabled: !!jobId,
     staleTime: 60000, // Cache for 1 minute
+  });
+}
+
+// =============================================================================
+// Context Blocks (Research / Prompt Engineering)
+// =============================================================================
+
+export function useContextSearch(jobId: string | null, query: string) {
+  return useQuery({
+    queryKey: jobId ? queryKeys.contextSearch(jobId, query) : ['noop'],
+    queryFn: async () => {
+      if (!jobId) return { results: [] };
+      return api.searchContext(jobId, query, 100);
+    },
+    enabled: !!jobId,
+    refetchInterval: 4000,
+  });
+}
+
+export function useContextBlock(jobId: string | null, contextId: string | null) {
+  return useQuery({
+    queryKey: jobId && contextId ? queryKeys.contextBlock(jobId, contextId) : ['noop'],
+    queryFn: async () => {
+      if (!jobId || !contextId) return null;
+      return api.getContextBlock(jobId, contextId);
+    },
+    enabled: !!jobId && !!contextId,
+  });
+}
+
+export function useAddContextBlock(jobId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: { blockType: string; content: string; tags: string[] }) =>
+      api.addContextBlock(jobId, payload.blockType, payload.content, payload.tags),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs', jobId, 'context'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
+    },
+  });
+}
+
+export function useUpdateContextBlock(jobId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: {
+      contextId: string;
+      patch: { block_type?: string; content?: string; tags?: string[] };
+    }) => api.updateContextBlock(jobId, payload.contextId, payload.patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs', jobId, 'context'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
+    },
+  });
+}
+
+export function useDeleteContextBlock(jobId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (contextId: string) => api.deleteContextBlock(jobId, contextId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs', jobId, 'context'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
+    },
   });
 }
 
@@ -273,6 +344,18 @@ export function useApplyTemplate(jobId: string) {
   });
 }
 
+export function useUpdateJobPolicies(jobId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: { update: Record<string, unknown>; merge?: boolean }) =>
+      api.updateJobPolicies(jobId, payload.update, payload.merge ?? true),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
+    },
+  });
+}
+
 export function useSetJobReady(jobId: string) {
   const queryClient = useQueryClient();
 
@@ -373,25 +456,6 @@ export function useSubmitStepResult(jobId: string) {
         devlogLine,
         commitHash
       ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
-    },
-  });
-}
-
-export function useAddContextBlock(jobId: string) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({
-      blockType,
-      content,
-      tags,
-    }: {
-      blockType: string;
-      content: string;
-      tags: string[];
-    }) => api.addContextBlock(jobId, blockType, content, tags),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
     },

@@ -18,6 +18,7 @@ import '@xyflow/react/dist/style.css';
 import { ArrowPathIcon, PlusIcon } from '@heroicons/react/24/outline';
 
 import { useProposeSteps } from '@/hooks/useUIState';
+import { saveUIState } from '@/lib/api';
 import { StepNode, type StepNodeData } from './StepNode';
 import { TemplateSidebar, type WorkflowTemplatePayload } from './TemplateSidebar';
 
@@ -44,9 +45,13 @@ function parseLines(value: unknown): string[] {
 export function FlowCanvas({
   jobId,
   initialSteps,
+  initialGraphState,
+  onStepsChange,
 }: {
   jobId: string;
   initialSteps?: any[];
+  initialGraphState?: { nodes: any[]; edges: any[]; viewport: any };
+  onStepsChange?: (steps: any[]) => void;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const nextId = useRef(1);
@@ -61,9 +66,12 @@ export function FlowCanvas({
 
   const updateNodeData = useCallback(
     (nodeId: string, patch: Partial<StepNodeData>) => {
-      setNodes((nds) =>
-        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n))
-      );
+      setNodes((nds) => {
+        const nextNodes = nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n));
+        // We could call onStepsChange here but that might be noisy. 
+        // Better to rely on a generic effect or call it specifically on significant changes.
+        return nextNodes;
+      });
     },
     [setNodes]
   );
@@ -194,6 +202,7 @@ export function FlowCanvas({
       data: {
         title: `Step ${nodeId.replace('step_', '')}`,
         instruction: '',
+        status: 'PENDING',
         acceptance_criteria: '',
         required_evidence: '',
       },
@@ -211,8 +220,70 @@ export function FlowCanvas({
     );
   }, [getId, setEdges, setNodes, withHandlers]);
 
+  // Sync back to parent if requested
+  useEffect(() => {
+    if (!onStepsChange) return;
+
+    // Build path from 'start'
+    const adj = new Map<string, string>();
+    edges.forEach((e) => adj.set(e.source, e.target));
+
+    const orderedNodes: Node[] = [];
+    let curr = 'start';
+    const visited = new Set<string>();
+
+    while (curr && !visited.has(curr)) {
+      visited.add(curr);
+      const next = adj.get(curr);
+      if (!next) break;
+
+      const node = nodes.find(n => n.id === next);
+      if (node) {
+        orderedNodes.push(node);
+        curr = next;
+      } else {
+        break;
+      }
+    }
+
+    const currentSteps = orderedNodes
+      .filter((n) => n.id !== 'start')
+      .map((n) => ({
+        id: n.id,
+        title: n.data.title || '',
+        instruction_prompt: n.data.instruction || '',
+        acceptance_criteria: (n.data as any).acceptance_criteria || '',
+        required_evidence: (n.data as any).required_evidence || '',
+      }));
+
+    onStepsChange(currentSteps);
+  }, [nodes, edges, onStepsChange]);
+
   const onSave = useCallback(async () => {
-    const validNodes = nodes
+    // Build path from 'start'
+    const adj = new Map<string, string>();
+    edges.forEach((e) => adj.set(e.source, e.target));
+
+    const orderedNodes: Node[] = [];
+    let curr = 'start';
+    const visited = new Set<string>();
+
+    // Linear traversal from start
+    while (curr && !visited.has(curr)) {
+      visited.add(curr);
+      const next = adj.get(curr);
+      if (!next) break;
+
+      const node = nodes.find(n => n.id === next);
+      if (node) {
+        orderedNodes.push(node);
+        curr = next;
+      } else {
+        break;
+      }
+    }
+
+    const validNodes = orderedNodes
       .filter((n) => n.id !== 'start')
       .filter((n) => Boolean(n.data?.title) && Boolean(n.data?.instruction))
       .map((n) => ({
@@ -224,14 +295,50 @@ export function FlowCanvas({
       }));
 
     if (validNodes.length > 0) {
+      // Save logical plan
       await proposeStepsMutation.mutateAsync(validNodes);
-    }
-  }, [nodes, proposeStepsMutation]);
 
-  // When used to edit an existing plan, seed the canvas from the step list.
-  // This is a linear layout by default; the user can rewire edges in the canvas.
-  // The backend currently stores steps linearly, so we persist the ordered list.
+      // Save visual state
+      if (rfInstance) {
+        await saveUIState(jobId, {
+          nodes: nodes.map(n => ({
+            ...n,
+            // Strip handlers or circular types if necessary, though React Flow nodes are usually JSON clean
+            data: {
+              ...n.data,
+              // Ensure functions are removed if any (StepNodeData has handlers)
+              onChange: undefined,
+              onDelete: undefined
+            }
+          })),
+          edges,
+          viewport: rfInstance.getViewport(),
+        });
+      }
+    }
+  }, [nodes, edges, proposeStepsMutation, jobId, rfInstance]);
+
+  // Initialization logic
   useEffect(() => {
+    // If we have saved graph state, use it!
+    if (initialGraphState && initialGraphState.nodes && initialGraphState.nodes.length > 0) {
+      setNodes(initialGraphState.nodes.map(n => ({
+        ...n,
+        position: n.position || { x: 0, y: 0 },
+        data: {
+          ...n.data,
+          status: initialSteps?.find(s => s.step_id === n.id)?.status || n.data?.status || 'PENDING'
+        }
+      })));
+      setEdges(initialGraphState.edges || []);
+
+      if (initialGraphState.viewport && rfInstance) {
+        rfInstance.setViewport(initialGraphState.viewport);
+      }
+      return;
+    }
+
+    // Fallback to seed from step list
     if (!initialSteps || initialSteps.length === 0) return;
 
     const seededStepNodes: Node[] = initialSteps.map((s: any, idx: number) => ({
@@ -241,6 +348,7 @@ export function FlowCanvas({
       data: {
         title: s.title ?? `Step ${idx + 1}`,
         instruction: s.instruction_prompt ?? '',
+        status: s.status || 'PENDING',
         acceptance_criteria: Array.isArray(s.acceptance_criteria)
           ? s.acceptance_criteria.join('\n')
           : '',
@@ -261,7 +369,7 @@ export function FlowCanvas({
 
     setNodes([startNode, ...seededStepNodes]);
     setEdges(seededEdges);
-  }, [getId, initialSteps, setEdges, setNodes]);
+  }, [getId, initialSteps, initialGraphState, setEdges, setNodes, rfInstance]);
 
   const flowPanel = useMemo(
     () => (
@@ -325,11 +433,17 @@ export function FlowCanvas({
   );
 }
 
-export default function FlowCanvasWrapper(props: { jobId: string; initialSteps?: any[] }) {
+type FlowCanvasWrapperProps = {
+  jobId: string;
+  initialSteps?: any[];
+  initialGraphState?: { nodes: any[]; edges: any[]; viewport: any };
+  onStepsChange?: (steps: any[]) => void;
+};
+
+export default function FlowCanvasWrapper(props: FlowCanvasWrapperProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvas {...props} />
     </ReactFlowProvider>
   );
 }
-

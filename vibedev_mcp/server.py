@@ -63,6 +63,7 @@ DEFAULT_POLICIES: dict[str, Any] = {
     # Safety: shell-executing gates are opt-in and allowlisted per job.
     "enable_shell_gates": False,
     "shell_gate_allowlist": [],
+    "checkpoint_interval_steps": 5,
 }
 
 
@@ -267,8 +268,91 @@ async def context_search(params: ContextSearchInput, ctx: Context) -> dict[str, 
     return {"count": len(results), "items": results}
 
 
-class PlanSetDeliverablesInput(BaseModel):
+class ContextUpdateBlockInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    context_id: str = Field(..., min_length=1)
+    block_type: str | None = Field(default=None)
+    content: str | None = Field(default=None)
+    tags: list[str] | None = Field(default=None)
+
+
+@mcp.tool(
+    name="context_update_block",
+    annotations={
+        "title": "Update a context block (prompt pack / note / gate / etc.)",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def context_update_block(params: ContextUpdateBlockInput, ctx: Context) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    block = await store.context_update_block(
+        job_id=params.job_id,
+        context_id=params.context_id,
+        block_type=params.block_type,
+        content=params.content,
+        tags=params.tags,
+    )
+    return {"ok": True, "block": block}
+
+
+class ContextDeleteBlockInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    context_id: str = Field(..., min_length=1)
+
+
+@mcp.tool(
+    name="context_delete_block",
+    annotations={
+        "title": "Delete a context block",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def context_delete_block(params: ContextDeleteBlockInput, ctx: Context) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    await store.context_delete_block(job_id=params.job_id, context_id=params.context_id)
+    return {"ok": True}
+
+
+class JobUpdatePoliciesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    update: dict[str, Any] = Field(default_factory=dict)
+    merge: bool = Field(default=True)
+
+
+@mcp.tool(
+    name="job_update_policies",
+    annotations={
+        "title": "Update job policies (merge by default)",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def job_update_policies(params: JobUpdatePoliciesInput, ctx: Context) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    job = await store.job_update_policies(
+        job_id=params.job_id,
+        update=params.update,
+        merge=params.merge,
+    )
+    return {"ok": True, "job": job}
+
+
+class PlanSetDeliverablesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)        
 
     job_id: str = Field(..., min_length=1)
     deliverables: list[str] = Field(..., min_length=1)

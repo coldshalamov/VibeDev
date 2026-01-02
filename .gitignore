@@ -16,3 +16,8 @@ vibedev-ui/dist/
 # Frontend dependencies / caches
 vibedev-ui/node_modules/
 vibedev-ui/.vite/
+
+# VS Code extension build output / deps
+vibedev-vscode/node_modules/
+vibedev-vscode/dist/
+vibedev-vscode/*.vsix

@@ -36,6 +36,15 @@ vi.mock('@xyflow/react', async () => {
     },
   ];
 
+  const mockEdges = [
+    {
+      id: 'e_start_step_1',
+      source: 'start',
+      target: 'step_1',
+      animated: true,
+    },
+  ];
+
   return {
     ReactFlow: ({ children }: { children: React.ReactNode }) => (
       <div data-testid="reactflow">{children}</div>
@@ -50,7 +59,7 @@ vi.mock('@xyflow/react', async () => {
     BackgroundVariant: { Dots: 'Dots' },
     addEdge: (params: unknown, edges: unknown[]) => [...edges, params],
     useNodesState: () => [mockNodes, vi.fn(), vi.fn()],
-    useEdgesState: () => [[], vi.fn(), vi.fn()],
+    useEdgesState: () => [mockEdges, vi.fn(), vi.fn()],
   };
 });
 

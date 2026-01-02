@@ -68,8 +68,13 @@
       "properties": {
         "vibedev.serverUrl": {
           "type": "string",
+          "default": "http://127.0.0.1:8765",
+          "description": "VibeDev MCP HTTP server URL (run `vibedev-mcp serve`)"
+        },
+        "vibedev.dashboardUrl": {
+          "type": "string",
           "default": "http://localhost:3000",
-          "description": "VibeDev HTTP server URL"
+          "description": "VibeDev Studio web UI URL"
         },
         "vibedev.autoprompt.enabled": {
           "type": "boolean",

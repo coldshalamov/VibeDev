@@ -213,6 +213,12 @@ class VibeDevStore:
               content_json TEXT NOT NULL,
               created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS job_ui_state (
+              job_id TEXT PRIMARY KEY,
+              graph_state_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
+            );
             """
         )
         await self._ensure_jobs_columns(
@@ -396,6 +402,42 @@ class VibeDevStore:
         data = dict(row)
         data["tags"] = json.loads(data.pop("tags_json") or "[]")
         return data
+
+    async def context_update_block(
+        self,
+        *,
+        job_id: str,
+        context_id: str,
+        block_type: str | None = None,
+        content: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing context block and return the updated row."""
+        current = await self.context_get_block(job_id=job_id, context_id=context_id)
+        next_block_type = block_type if block_type is not None else current["block_type"]
+        next_content = content if content is not None else current["content"]
+        next_tags = tags if tags is not None else current["tags"]
+
+        await self._conn.execute(
+            """
+            UPDATE context_blocks
+            SET block_type = ?, content = ?, tags_json = ?
+            WHERE job_id = ? AND context_id = ?;
+            """,
+            (next_block_type, next_content, json.dumps(next_tags), job_id, context_id),
+        )
+        await self._conn.commit()
+        return await self.context_get_block(job_id=job_id, context_id=context_id)
+
+    async def context_delete_block(self, *, job_id: str, context_id: str) -> None:
+        """Delete a context block, raising KeyError if not found."""
+        # Ensure it exists (consistent error behavior).
+        await self.context_get_block(job_id=job_id, context_id=context_id)
+        await self._conn.execute(
+            "DELETE FROM context_blocks WHERE job_id = ? AND context_id = ?;",
+            (job_id, context_id),
+        )
+        await self._conn.commit()
 
     async def context_search(self, *, job_id: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
         like = f"%{query}%"
@@ -1962,6 +2004,9 @@ class VibeDevStore:
         # Context health indicators
         context_blocks = await self.context_search(job_id=job_id, query="", limit=100)
 
+        # Get flow state
+        flow_state = await self.get_flow_state(job_id)
+
         return {
             "job": {
                 "job_id": job["job_id"],
@@ -1989,7 +2034,85 @@ class VibeDevStore:
             "git_status": git_state,
             "context_block_count": len(context_blocks),
             "planning_answers": job.get("planning_answers", {}),
+            "flow_state": flow_state,
         }
+
+    async def save_flow_state(self, job_id: str, graph_state: dict[str, Any]) -> None:
+        """Save the FlowCanvas graph state."""
+        state_json = json.dumps(graph_state)
+        now = _utc_now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO job_ui_state (job_id, graph_state_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                graph_state_json = excluded.graph_state_json,
+                updated_at = excluded.updated_at;
+            """,
+            (job_id, state_json, now),
+        )
+        await self._conn.commit()
+
+    async def get_flow_state(self, job_id: str) -> dict[str, Any] | None:
+        """Get the saved FlowCanvas graph state."""
+        async with self._conn.execute(
+            "SELECT graph_state_json FROM job_ui_state WHERE job_id = ?;", (job_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return json.loads(row[0])
+            return None
+
+    async def job_export_markdown(self, job_id: str) -> str:
+        """Export job history and state to a comprehensive Markdown report."""
+        ui_state = await self.get_ui_state(job_id)
+        job = ui_state["job"]
+        steps = ui_state["steps"]
+        phase = ui_state["phase"]
+
+        md = []
+        md.append(f"# Job Report: {job['title']}")
+        md.append(f"\n**Status:** {job['status']}")
+        md.append(f"\n**Goal:**\n{job['goal']}")
+        
+        if job.get('repo_root'):
+            md.append(f"\n**Repository:** `{job['repo_root']}`")
+
+        md.append("\n## Policies")
+        policies = job.get('policies', {})
+        if policies:
+            for k, v in policies.items():
+                md.append(f"- **{k}:** {v}")
+        else:
+            md.append("*No specific policies defined.*")
+
+        md.append("\n## Progress")
+        md.append(f"Phase: {phase['current_phase_name']} ({phase['current_phase']}/{phase['total_phases']})")
+        md.append(f"Steps: {ui_state['total_steps']} total")
+
+        md.append("\n## Timeline")
+        for idx, step in enumerate(steps):
+            status_icon = "✅" if step["status"] == "DONE" else "🔄" if step["status"] == "ACTIVE" else "⏳"
+            md.append(f"\n### {idx + 1}. {status_icon} {step['title']}")
+            md.append(f"**Instruction:** {step['instruction_prompt']}")
+            
+            # Get attempts for this step
+            async with self._conn.execute(
+                "SELECT model_claim, summary, evidence_json, accepted, created_at FROM step_attempts WHERE step_id = ? ORDER BY created_at ASC",
+                (step["step_id"],)
+            ) as cursor:
+                attempts = await cursor.fetchall()
+                if attempts:
+                    md.append("\n#### Attempts")
+                    for a_idx, (claim, summary, evidence_json, accepted, created_at) in enumerate(attempts):
+                        acc_str = "✅ Accepted" if accepted else "❌ Rejected"
+                        md.append(f"\n**Attempt {a_idx + 1}** ({created_at}) - *{acc_str}*")
+                        md.append(f"> **Model Claim:** {claim}")
+                        md.append(f"> **Summary:** {summary}")
+                else:
+                    md.append("\n*No attempts yet.*")
+
+        return "\n".join(md)
 
     # =========================================================================
     # Job Lifecycle Methods

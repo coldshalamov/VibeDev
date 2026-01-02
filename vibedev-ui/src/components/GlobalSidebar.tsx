@@ -10,7 +10,9 @@ import {
   ShieldCheckIcon,
   ExclamationTriangleIcon,
   ServerStackIcon,
+  ArrowDownTrayIcon,
 } from '@heroicons/react/24/outline'; // Assuming you have heroicons or use SVGs
+import { exportJob } from '@/lib/api';
 
 export function GlobalSidebar() {
   const uiState = useVibeDevStore((state) => state.uiState);
@@ -96,19 +98,48 @@ export function GlobalSidebar() {
     };
   }, [job.status]);
 
+  const handleExport = async () => {
+    try {
+      const res = await exportJob(job.job_id, 'md');
+      if (!res.content) throw new Error('Missing export content');
+      const blob = new Blob([res.content], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `job-report-${job.job_id}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export failed:', err);
+      alert('Failed to export job report.');
+    }
+  };
+
   return (
     <div className="h-full border-r border-white/5 bg-card/60 backdrop-blur-2xl flex flex-col text-sm font-sans">
       {/* HUD Header */}
       <div className="p-4 border-b border-white/5 bg-black/20">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className={cn('w-2 h-2 rounded-full', statusPill.dot)} />
-          <div className="min-w-0">
-            <h2 className="font-bold tracking-tight text-white/90 truncate">{job.title}</h2>
-            <p className="text-xs text-muted-foreground truncate font-mono mt-0.5">{job.job_id.slice(0, 8)}</p>
+            {/* Removed the standalone dot here, it's now inside the status pill */}
+            <div className="min-w-0">
+              <h2 className="font-bold tracking-tight text-white/90 truncate">{job.title}</h2>
+              <p className="text-xs text-muted-foreground truncate font-mono mt-0.5">{job.job_id.slice(0, 8)}</p>
+            </div>
           </div>
+          <div className="flex items-center gap-2">
+            <span className={statusPill.className}>
+              <span className={cn("w-1.5 h-1.5 rounded-full", statusPill.dot)} />
+              {statusPill.label}
+            </span>
+            <button
+              onClick={handleExport}
+              className="p-1.5 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-muted-foreground hover:text-white"
+              title="Export Job Report"
+            >
+              <ArrowDownTrayIcon className="w-4 h-4" />
+            </button>
           </div>
-          <div className={statusPill.className}>{statusPill.label}</div>
         </div>
       </div>
 

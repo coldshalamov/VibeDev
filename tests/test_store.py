@@ -120,6 +120,42 @@ async def test_context_add_and_get_block():
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
+@pytest.mark.asyncio
+async def test_context_update_and_delete_block():
+    """Test updating and deleting context blocks."""
+    from vibedev_mcp.store import VibeDevStore
+
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        store = await VibeDevStore.open(os.path.join(tmp_dir, "vibedev.sqlite3"))
+        job_id = await store.create_job(title="T", goal="G", repo_root=None, policies={})
+
+        context_id = await store.context_add_block(
+            job_id=job_id,
+            block_type="NOTE",
+            content="Original content",
+            tags=["a"],
+        )
+
+        updated = await store.context_update_block(
+            job_id=job_id,
+            context_id=context_id,
+            content="Updated content",
+            tags=["b", "c"],
+        )
+        assert updated["context_id"] == context_id
+        assert updated["block_type"] == "NOTE"
+        assert updated["content"] == "Updated content"
+        assert updated["tags"] == ["b", "c"]
+
+        await store.context_delete_block(job_id=job_id, context_id=context_id)
+        with pytest.raises(KeyError):
+            await store.context_get_block(job_id=job_id, context_id=context_id)
+
+        await store.close()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
 
 @pytest.mark.asyncio
 async def test_context_get_block_raises_for_missing():

@@ -16,6 +16,23 @@ from pydantic import BaseModel, ConfigDict, Field
 from vibedev_mcp.conductor import compute_next_questions
 from vibedev_mcp.models import ModelClaim
 from vibedev_mcp.store import VibeDevStore
+from vibedev_mcp.events import (
+    get_event_manager,
+    create_job_event,
+    create_step_event,
+    SSEEvent,
+    EVENT_JOB_CREATED,
+    EVENT_JOB_UPDATED,
+    EVENT_JOB_STATUS_CHANGED,
+    EVENT_STEP_STARTED,
+    EVENT_STEP_COMPLETED,
+    EVENT_ATTEMPT_SUBMITTED,
+    EVENT_MISTAKE_RECORDED,
+    EVENT_DEVLOG_APPENDED,
+    EVENT_CONTEXT_ADDED,
+    EVENT_CONTEXT_UPDATED,
+    EVENT_CONTEXT_DELETED,
+)
 # from vibedev_mcp.templates import get_template, list_templates # Moved to store
 
 
@@ -109,7 +126,15 @@ class AddContextBlockInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     block_type: str = Field(..., min_length=1)
     content: str = Field(..., min_length=1)
-    tags: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)        
+
+
+class UpdateContextBlockInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    block_type: str | None = Field(default=None, min_length=1)
+    content: str | None = Field(default=None, min_length=1)
+    tags: list[str] | None = None
 
 
 class RepoSnapshotInput(BaseModel):
@@ -135,6 +160,13 @@ class ApplyTemplateInput(BaseModel):
 
     overwrite_planning_artifacts: bool = False
     overwrite_steps: bool = True
+
+
+class UpdatePoliciesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    update: dict[str, Any] = Field(default_factory=dict)
+    merge: bool = True
 
 
 def create_app(*, db_path: Path | None = None) -> FastAPI:
@@ -191,7 +223,55 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
     async def api_health(request: Request) -> HealthResponse:
         return await health(request)
 
-    # ------------------------------------------------------------------------- 
+    # -------------------------------------------------------------------------
+    # SSE Events
+    # -------------------------------------------------------------------------
+
+    async def _event_generator(job_id: str | None = None):
+        """Generate SSE events for a subscriber."""
+        event_manager = get_event_manager()
+        queue = await event_manager.subscribe(job_id)
+        try:
+            while True:
+                try:
+                    # Wait for next event with timeout
+                    event: SSEEvent = await asyncio.wait_for(
+                        queue.get(), timeout=30.0
+                    )
+                    yield event.to_sse_string()
+                except asyncio.TimeoutError:
+                    # Send keepalive
+                    yield ": keepalive\n\n"
+        finally:
+            await event_manager.unsubscribe(queue, job_id)
+
+    @app.get("/api/jobs/{job_id}/events")
+    async def job_events_stream(job_id: str) -> StreamingResponse:
+        """SSE endpoint for real-time job events."""
+        return StreamingResponse(
+            _event_generator(job_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.get("/api/events")
+    async def all_events_stream() -> StreamingResponse:
+        """SSE endpoint for all job events (global stream)."""
+        return StreamingResponse(
+            _event_generator(None),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # -------------------------------------------------------------------------
     # Jobs
     # ------------------------------------------------------------------------- 
 
@@ -256,6 +336,16 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         )
         job = await store.get_job(job_id)
         questions = compute_next_questions(job)
+        
+        # Publish SSE event
+        event_manager = get_event_manager()
+        await event_manager.publish(create_job_event(
+            EVENT_JOB_CREATED,
+            job_id,
+            title=job.get("title"),
+            status=job.get("status"),
+        ))
+        
         return {"job_id": job_id, "questions": questions}
 
     @app.get("/api/jobs")
@@ -274,10 +364,42 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         store = store_from(request)
         return await store.get_job(job_id)
 
+    @app.patch("/api/jobs/{job_id}/policies")
+    async def update_policies(
+        job_id: str, payload: UpdatePoliciesInput, request: Request
+    ) -> dict[str, Any]:
+        """Update job policies (merge by default)."""
+        store = store_from(request)
+        job = await store.job_update_policies(
+            job_id=job_id,
+            update=payload.update,
+            merge=payload.merge,
+        )
+
+        event_manager = get_event_manager()
+        await event_manager.publish(
+            create_job_event(
+                EVENT_JOB_UPDATED,
+                job_id,
+                update=payload.update,
+                policies=job.get("policies"),
+            )
+        )
+        return {"ok": True, "job": job}
+
     @app.get("/api/jobs/{job_id}/ui-state")
     async def get_ui_state(job_id: str, request: Request) -> dict[str, Any]:
         store = store_from(request)
         return await store.get_ui_state(job_id)
+
+    @app.post("/api/jobs/{job_id}/ui-state")
+    async def save_ui_state(job_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+        """Save specific UI state components (e.g. flow graph)."""
+        store = store_from(request)
+        graph_state = payload.get("graph_state")
+        if graph_state:
+            await store.save_flow_state(job_id, graph_state)
+        return {"ok": True}
 
     # -------------------------------------------------------------------------
     # Planning questions
@@ -404,17 +526,29 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         await store.job_archive(job_id=job_id)
         return {"ok": True}
 
+    @app.get("/api/jobs/{job_id}/export-legacy")
+    async def export_job(job_id: str, request: Request, format: str = "markdown") -> dict[str, Any]:
+        """Export the job to a specific format."""
+        store = store_from(request)
+        if format == "markdown":
+            content = await store.job_export_markdown(job_id)
+            return {"ok": True, "format": "markdown", "content": content}
+        return {"ok": False, "error": f"Unsupported format: {format}"}
+
     @app.get("/api/jobs/{job_id}/step-prompt")
     async def step_prompt(job_id: str, request: Request) -> dict[str, Any]:
         store = store_from(request)
         return await store.job_next_step_prompt(job_id)
 
     @app.post("/api/jobs/{job_id}/steps/{step_id}/submit")
-    async def submit_step(
-        job_id: str, step_id: str, payload: SubmitStepInput, request: Request
+    async def submit_step_result(
+        job_id: str,
+        step_id: str,
+        payload: SubmitStepInput,
+        request: Request,
     ) -> dict[str, Any]:
         store = store_from(request)
-        return await store.job_submit_step_result(
+        result = await store.job_submit_step_result(
             job_id=job_id,
             step_id=step_id,
             model_claim=payload.model_claim,
@@ -423,6 +557,40 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
             devlog_line=payload.devlog_line,
             commit_hash=payload.commit_hash,
         )
+        
+        # Publish SSE events
+        event_manager = get_event_manager()
+        
+        # Always publish attempt submitted event
+        await event_manager.publish(create_step_event(
+            EVENT_ATTEMPT_SUBMITTED,
+            job_id,
+            step_id,
+            accepted=result.get("accepted", False),
+            summary=payload.summary,
+        ))
+        
+        # If accepted, publish step completed event
+        if result.get("accepted"):
+            await event_manager.publish(create_step_event(
+                EVENT_STEP_COMPLETED,
+                job_id,
+                step_id,
+                next_step_id=result.get("next_step_id"),
+            ))
+            
+            # If next step is available, publish step started event
+            next_step_id = result.get("next_step_id")
+            if next_step_id:
+                await event_manager.publish(create_step_event(
+                    EVENT_STEP_STARTED,
+                    job_id,
+                    next_step_id,
+                ))
+
+        return result
+
+
 
     @app.post("/api/jobs/{job_id}/steps/{step_id}/approve")
     async def approve_step(job_id: str, step_id: str, request: Request) -> dict[str, Any]:
@@ -437,6 +605,187 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         return await store.revoke_step_approval(job_id=job_id, step_id=step_id)
 
     # -------------------------------------------------------------------------
+    # VS Code Extension / Autoprompt Support
+    # -------------------------------------------------------------------------
+
+    @app.get("/api/jobs/current")
+    async def get_current_job(request: Request) -> dict[str, Any]:
+        """Get the most recently active job (for VS Code extension)."""
+        store = store_from(request)
+        result = await store.job_list(status="EXECUTING", limit=1, offset=0)
+        if result["count"] > 0:
+            job = result["items"][0]
+            return {"job_id": job["job_id"]}
+
+        # If no executing jobs, try READY
+        result = await store.job_list(status="READY", limit=1, offset=0)
+        if result["count"] > 0:
+            job = result["items"][0]
+            return {"job_id": job["job_id"]}
+
+        # If no READY jobs, try PAUSED
+        result = await store.job_list(status="PAUSED", limit=1, offset=0)
+        if result["count"] > 0:
+            job = result["items"][0]
+            return {"job_id": job["job_id"]}
+
+        return {"job_id": None}
+
+    @app.get("/api/jobs/{job_id}/status")
+    async def get_job_status(job_id: str, request: Request) -> dict[str, Any]:
+        """Get concise job status (for VS Code status bar)."""
+        store = store_from(request)
+        job = await store.get_job(job_id)
+
+        current_step_title = None
+        if job["status"] == "EXECUTING" and job.get("step_order"):
+            idx = int(job.get("current_step_index") or 0)
+            step_order: list[str] = job["step_order"]
+            if 0 <= idx < len(step_order):
+                step_id = step_order[idx]
+                step = await store._get_step(job_id, step_id)
+                current_step_title = step.get("title")
+
+        return {
+            "job_id": job_id,
+            "status": job["status"],
+            "title": job.get("title", "Untitled"),
+            "current_step_index": job.get("current_step_index", 0),
+            "total_steps": len(job.get("step_order", [])),
+            "current_step_title": current_step_title,
+        }
+
+    @app.get("/api/jobs/{job_id}/next-prompt-auto")
+    async def get_next_prompt_auto(job_id: str, request: Request) -> dict[str, Any]:
+        """Get next prompt for autoprompt mode (VS Code extension)."""
+        store = store_from(request)
+        job = await store.get_job(job_id)
+
+        if job["status"] != "EXECUTING":
+            if job["status"] == "COMPLETE":
+                return {"action": "JOB_COMPLETE", "job_id": job_id}
+            elif job["status"] == "PAUSED":
+                return {"action": "AWAIT_HUMAN", "reason": "Job is paused", "job_id": job_id}
+            elif job["status"] == "FAILED":
+                return {"action": "JOB_COMPLETE", "job_id": job_id}
+            else:
+                raise HTTPException(400, f"Job {job_id} is not executing (status={job['status']})")
+
+        # Get current step
+        step_order: list[str] = job.get("step_order", [])
+        idx = int(job.get("current_step_index") or 0)
+
+        if idx >= len(step_order):
+            # Job complete
+            return {"action": "JOB_COMPLETE", "job_id": job_id}
+
+        step_id = step_order[idx]
+        step = await store._get_step(job_id, step_id)
+
+        # Check if human review needed
+        if step.get("human_review"):
+            return {
+                "action": "AWAIT_HUMAN",
+                "reason": "Step requires human review",
+                "step_id": step_id,
+                "job_id": job_id,
+            }
+
+        # Check retry count to determine if we're in diagnose mode
+        async with store._conn.execute(
+            "SELECT COUNT(*) FROM attempts WHERE step_id = ? AND accepted = 0",
+            (step_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            retry_count = row[0] if row else 0
+
+        policies = job.get("policies") or {}
+        max_retries = policies.get("max_retries_per_step", 2)
+
+        if retry_count >= max_retries:
+            # In diagnose mode
+            return {
+                "action": "DIAGNOSE",
+                "step_id": step_id,
+                "job_id": job_id,
+                "retry_count": retry_count,
+            }
+
+        # Get the prompt
+        prompt_data = await store.job_next_step_prompt(job_id)
+        prompt = prompt_data.get("prompt", "")
+
+        # Add completion marker
+        marker = f"\n\n✓ VD_READY_{job_id}"
+
+        # Check if we should start a new thread (every N steps)
+        checkpoint_interval = policies.get("checkpoint_interval_steps", 5)
+        if checkpoint_interval > 0 and (idx + 1) % checkpoint_interval == 0 and idx > 0:
+            return {
+                "action": "NEW_THREAD",
+                "prompt": prompt + marker,
+                "step_id": step_id,
+                "job_id": job_id,
+                "reason": f"Starting new thread at checkpoint (every {checkpoint_interval} steps)",
+            }
+
+        return {
+            "action": "NEXT_STEP" if retry_count == 0 else "RETRY",
+            "prompt": prompt + marker,
+            "step_id": step_id,
+            "job_id": job_id,
+            "attempt": retry_count + 1,
+        }
+
+    @app.post("/api/jobs/{job_id}/submit-evidence")
+    async def submit_evidence_simplified(job_id: str, request: Request) -> dict[str, Any]:
+        """Simplified evidence submission (for VS Code extension)."""
+        body = await request.json()
+        evidence = body.get("evidence", {})
+        model_claim = body.get("model_claim", "MET")
+        summary = body.get("summary", "")
+
+        store = store_from(request)
+        job = await store.get_job(job_id)
+
+        if job["status"] != "EXECUTING":
+            raise HTTPException(400, f"Job {job_id} is not executing")
+
+        step_order: list[str] = job.get("step_order", [])
+        idx = int(job.get("current_step_index") or 0)
+
+        if idx >= len(step_order):
+            raise HTTPException(400, "No active step")
+
+        step_id = step_order[idx]
+
+        # Submit using existing method
+        result = await store.job_submit_step_result(
+            job_id=job_id,
+            step_id=step_id,
+            model_claim=ModelClaim(model_claim),
+            summary=summary,
+            evidence=evidence,
+            devlog_line=None,
+            commit_hash=None,
+        )
+
+        return {
+            "accepted": result.get("accepted", False),
+            "feedback": result.get("feedback"),
+            "next_action": result.get("next_action"),
+            "next_step_id": result.get("next_step_id"),
+            "rejection_reasons": result.get("rejection_reasons", []),
+        }
+
+    @app.get("/api/jobs/{job_id}/response-complete")
+    async def check_response_complete(job_id: str, request: Request) -> dict[str, Any]:
+        """Check if last response completed (for autoprompt polling)."""
+        # For now, always return true (extension uses timeout-based waiting)
+        # In future, could track evidence submission timestamp
+        return {"complete": True, "job_id": job_id}
+
+    # -------------------------------------------------------------------------
     # Context
     # -------------------------------------------------------------------------
 
@@ -449,12 +798,64 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
             content=payload.content,
             tags=payload.tags,
         )
+
+        event_manager = get_event_manager()
+        await event_manager.publish(
+            create_job_event(
+                EVENT_CONTEXT_ADDED,
+                job_id,
+                context_id=context_id,
+                block_type=payload.block_type,
+                tags=payload.tags,
+            )
+        )
         return {"context_id": context_id}
 
     @app.get("/api/jobs/{job_id}/context/{context_id}")
     async def get_context(job_id: str, context_id: str, request: Request) -> dict[str, Any]:
         store = store_from(request)
         return await store.context_get_block(job_id=job_id, context_id=context_id)
+
+    @app.patch("/api/jobs/{job_id}/context/{context_id}")
+    async def update_context(
+        job_id: str,
+        context_id: str,
+        payload: UpdateContextBlockInput,
+        request: Request,
+    ) -> dict[str, Any]:
+        store = store_from(request)
+        block = await store.context_update_block(
+            job_id=job_id,
+            context_id=context_id,
+            block_type=payload.block_type,
+            content=payload.content,
+            tags=payload.tags,
+        )
+
+        event_manager = get_event_manager()
+        await event_manager.publish(
+            create_job_event(
+                EVENT_CONTEXT_UPDATED,
+                job_id,
+                context_id=context_id,
+                block_type=block.get("block_type"),
+                tags=block.get("tags", []),
+            )
+        )
+        return {"ok": True, "block": block}
+
+    @app.delete("/api/jobs/{job_id}/context/{context_id}")
+    async def delete_context(
+        job_id: str, context_id: str, request: Request
+    ) -> dict[str, Any]:
+        store = store_from(request)
+        await store.context_delete_block(job_id=job_id, context_id=context_id)
+
+        event_manager = get_event_manager()
+        await event_manager.publish(
+            create_job_event(EVENT_CONTEXT_DELETED, job_id, context_id=context_id)
+        )
+        return {"ok": True}
 
     @app.get("/api/jobs/{job_id}/context/search")
     async def search_context(
@@ -593,7 +994,7 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
     # SSE
     # -------------------------------------------------------------------------
 
-    @app.get("/api/jobs/{job_id}/events")
+    @app.get("/api/jobs/{job_id}/events-poll")     
     async def events(job_id: str, request: Request) -> StreamingResponse:
         store = store_from(request)
 

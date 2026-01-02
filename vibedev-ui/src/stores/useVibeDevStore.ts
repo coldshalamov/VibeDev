@@ -125,10 +125,24 @@ export const useVibeDevStore = create<VibeDevState>()(
         setCurrentJob: (jobId) => set({ currentJobId: jobId }),
 
         setUIState: (state) => {
+          // IMPORTANT: UI state is refreshed frequently (polling + SSE). We must
+          // not override the user's selected view mode on every refresh.
+          const prev = get().uiState;
+          const prevJobId = prev?.job.job_id ?? null;
+          const prevStatus = prev?.job.status ?? null;
+
           set({ uiState: state });
-          // Auto-switch view mode based on job status
-          if (state) {
-            const status = state.job.status as JobStatus;
+
+          if (!state) return;
+
+          const status = state.job.status as JobStatus;
+          const jobChanged = prevJobId !== state.job.job_id;
+          const statusChanged = prevStatus !== status;
+          const currentMode = get().viewMode.mode;
+
+          // When the user selects a different job, pick a sensible default tab
+          // based on job status.
+          if (jobChanged) {
             if (status === 'PLANNING') {
               set({ viewMode: { mode: 'planning' } });
             } else if (status === 'EXECUTING' || status === 'READY') {
@@ -136,6 +150,17 @@ export const useVibeDevStore = create<VibeDevState>()(
             } else if (status === 'COMPLETE' || status === 'ARCHIVED') {
               set({ viewMode: { mode: 'review' } });
             }
+            return;
+          }
+
+          // For the same job, only auto-switch on *status transitions* — and
+          // only in the "expected" direction (e.g. planning -> execution).
+          if (!statusChanged) return;
+
+          if ((status === 'EXECUTING' || status === 'READY') && currentMode === 'planning') {
+            set({ viewMode: { mode: 'execution' } });
+          } else if ((status === 'COMPLETE' || status === 'ARCHIVED') && currentMode !== 'review') {
+            set({ viewMode: { mode: 'review' } });
           }
         },
 

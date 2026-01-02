@@ -162,6 +162,11 @@ export interface UIState {
   git_status: GitStatus | null;
   context_block_count: number;
   planning_answers: Record<string, unknown>;
+  flow_state?: {
+    nodes: unknown[];
+    edges: unknown[];
+    viewport: { x: number; y: number; zoom: number };
+  };
 }
 
 // =============================================================================
@@ -188,11 +193,11 @@ export interface SubmitResult {
   accepted: boolean;
   feedback: string;
   next_action:
-    | 'RETRY'
-    | 'NEXT_STEP_AVAILABLE'
-    | 'JOB_COMPLETE'
-    | 'PAUSE_FOR_HUMAN'
-    | 'FAIL_JOB';
+  | 'RETRY'
+  | 'NEXT_STEP_AVAILABLE'
+  | 'JOB_COMPLETE'
+  | 'PAUSE_FOR_HUMAN'
+  | 'FAIL_JOB';
   missing_fields: string[];
   rejection_reasons: string[];
 }

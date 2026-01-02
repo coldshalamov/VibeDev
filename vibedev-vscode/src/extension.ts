@@ -17,7 +17,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Initialize client
     const config = vscode.workspace.getConfiguration('vibedev');
-    const serverUrl = config.get<string>('serverUrl') || 'http://localhost:3000';
+    const serverUrl = config.get<string>('serverUrl') || 'http://127.0.0.1:8765';
     client = new VibedDevClient(serverUrl);
 
     // Initialize autoprompt engine
@@ -162,10 +162,11 @@ function registerCommands(context: vscode.ExtensionContext) {
 
     // Open Dashboard command
     context.subscriptions.push(
-        vscode.commands.registerCommand('vibedev.openDashboard', () => {
+        vscode.commands.registerCommand('vibedev.openDashboard', () => {        
             const config = vscode.workspace.getConfiguration('vibedev');
-            const serverUrl = config.get<string>('serverUrl') || 'http://localhost:3000';
-            vscode.env.openExternal(vscode.Uri.parse(serverUrl));
+            const dashboardUrl =
+                config.get<string>('dashboardUrl') || 'http://localhost:3000';
+            vscode.env.openExternal(vscode.Uri.parse(dashboardUrl));
         })
     );
 
