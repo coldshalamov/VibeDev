@@ -195,6 +195,7 @@ export async function setDefinitionOfDone(
 export async function proposeSteps(
   jobId: string,
   steps: Array<{
+    step_id?: string;
     title: string;
     instruction_prompt: string;
     acceptance_criteria?: string[];

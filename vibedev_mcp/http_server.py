@@ -222,6 +222,26 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Template not found or cannot be deleted")
         return {"ok": True}
 
+    @app.get("/api/templates/{template_id}")
+    async def get_template_detail(template_id: str, request: Request) -> dict[str, Any]:
+        """Get full template details including steps, gates, and policies."""
+        from vibedev_mcp.templates import get_template, list_templates
+
+        # First check built-in templates
+        try:
+            template = get_template(template_id)
+            return {"source": "builtin", "template": template}
+        except KeyError:
+            pass
+
+        # Then check custom templates in the store
+        store = store_from(request)
+        custom = await store.template_get(template_id)
+        if custom:
+            return {"source": "custom", "template": custom}
+
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+
     @app.post("/api/jobs")
     async def create_job(payload: CreateJobInput, request: Request) -> dict[str, Any]:
         store = store_from(request)

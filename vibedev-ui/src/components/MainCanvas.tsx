@@ -231,7 +231,11 @@ function QuestionField({
 // Step Creation Section
 // =============================================================================
 
+import FlowCanvas from './FlowCanvas';
+import { QueueListIcon, Squares2X2Icon } from '@heroicons/react/24/outline'; // Start expecting Heroicons
+
 function StepCreationSection({ jobId }: { jobId: string }) {
+  const [viewMode, setViewMode] = useState<'list' | 'canvas'>('canvas');
   const [steps, setSteps] = useState<
     Array<{
       id: string;
@@ -319,54 +323,86 @@ function StepCreationSection({ jobId }: { jobId: string }) {
   };
 
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <h3 className="panel-title">Define Execution Steps</h3>
-        <button
-          onClick={applyStrictTemplate}
-          disabled={applyTemplateMutation.isPending}
-          className="btn btn-outline"
-          title="Apply an opinionated best-practice step chain"
-        >
-          {applyTemplateMutation.isPending ? 'Applying...' : 'Apply Strict Template'}
-        </button>
-        <button onClick={addStep} className="btn btn-outline btn-icon" title="Add step">
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
+    <div className="flex flex-col gap-4 h-full">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xl font-bold tracking-tight">Workflow Architect</h3>
+        <div className="flex bg-muted rounded-lg p-1 border border-white/5">
+          <button
+            onClick={() => setViewMode('list')}
+            className={cn(
+              "px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-all",
+              viewMode === 'list' ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <QueueListIcon className="w-4 h-4" /> List
+          </button>
+          <button
+            onClick={() => setViewMode('canvas')}
+            className={cn(
+              "px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-all",
+              viewMode === 'canvas' ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Squares2X2Icon className="w-4 h-4" /> Canvas
+          </button>
+        </div>
       </div>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext items={steps.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-          <div className="space-y-4">
-            {steps.map((step, index) => (
-              <SortableStepItem
-                key={step.id}
-                id={step.id}
-                step={step}
-                index={index}
-                updateStep={updateStep}
-                removeStep={removeStep}
-              />
-            ))}
+      {viewMode === 'canvas' ? (
+        <FlowCanvas jobId={jobId} />
+      ) : (
+        <div className="panel animate-fade-in">
+          <div className="panel-header">
+            <h3 className="panel-title">Linear Step Editor</h3>
+            <div className="flex gap-2">
+              <button
+                onClick={applyStrictTemplate}
+                disabled={applyTemplateMutation.isPending}
+                className="btn btn-outline text-xs"
+                title="Apply an opinionated best-practice step chain"
+              >
+                {applyTemplateMutation.isPending ? 'Applying...' : 'Auto-Generate Plan'}
+              </button>
+              <button onClick={addStep} className="btn btn-outline btn-icon" title="Add step">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            </div>
           </div>
-        </SortableContext>
-      </DndContext>
 
-      <div className="mt-4 flex justify-end">
-        <button
-          onClick={handleSubmit}
-          disabled={proposeStepsMutation.isPending}
-          className="btn btn-primary"
-        >
-          {proposeStepsMutation.isPending ? 'Saving...' : 'Save Steps'}
-        </button>
-      </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={steps.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-4">
+                {steps.map((step, index) => (
+                  <SortableStepItem
+                    key={step.id}
+                    id={step.id}
+                    step={step}
+                    index={index}
+                    updateStep={updateStep}
+                    removeStep={removeStep}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={handleSubmit}
+              disabled={proposeStepsMutation.isPending}
+              className="btn btn-primary"
+            >
+              {proposeStepsMutation.isPending ? 'Saving...' : 'Save Steps'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -377,10 +413,12 @@ function StepCreationSection({ jobId }: { jobId: string }) {
 
 function StepListSection({
   steps,
+  jobId,
 }: {
   steps: any[];
   jobId: string;
 }) {
+  const [viewMode, setViewMode] = useState<'list' | 'canvas'>('canvas');
   const selectedStepIds = useVibeDevStore((state) => state.selectedStepIds);
   const toggleStepSelection = useVibeDevStore((state) => state.toggleStepSelection);
 
@@ -388,22 +426,50 @@ function StepListSection({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Execution Plan</h2>
-        <span className="text-sm text-muted-foreground">
-          {steps.length} steps
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">{steps.length} steps</span>
+          <div className="flex bg-muted rounded-lg p-1 border border-white/5">
+            <button
+              onClick={() => setViewMode('list')}
+              className={cn(
+                "px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-all",
+                viewMode === 'list'
+                  ? "bg-background shadow-sm text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <QueueListIcon className="w-4 h-4" /> List
+            </button>
+            <button
+              onClick={() => setViewMode('canvas')}
+              className={cn(
+                "px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-all",
+                viewMode === 'canvas'
+                  ? "bg-background shadow-sm text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Squares2X2Icon className="w-4 h-4" /> Canvas
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div className="space-y-3">
-        {steps.map((step, index) => (
-          <StepCard
-            key={step.step_id}
-            step={step}
-            index={index}
-            isSelected={selectedStepIds.includes(step.step_id)}
-            onToggleSelect={() => toggleStepSelection(step.step_id)}
-          />
-        ))}
-      </div>
+      {viewMode === 'canvas' ? (
+        <FlowCanvas jobId={jobId} initialSteps={steps} />
+      ) : (
+        <div className="space-y-3">
+          {steps.map((step, index) => (
+            <StepCard
+              key={step.step_id}
+              step={step}
+              index={index}
+              isSelected={selectedStepIds.includes(step.step_id)}
+              onToggleSelect={() => toggleStepSelection(step.step_id)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

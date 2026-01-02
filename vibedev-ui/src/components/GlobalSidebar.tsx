@@ -1,9 +1,16 @@
 // =============================================================================
-// Global Sidebar Component
+// Global Sidebar "Truth Surface"
 // =============================================================================
 
 import { useVibeDevStore } from '@/stores/useVibeDevStore';
 import { cn, formatDate } from '@/lib/utils';
+import { useMemo, useState } from 'react';
+import {
+  BookOpenIcon,
+  ShieldCheckIcon,
+  ExclamationTriangleIcon,
+  ServerStackIcon,
+} from '@heroicons/react/24/outline'; // Assuming you have heroicons or use SVGs
 
 export function GlobalSidebar() {
   const uiState = useVibeDevStore((state) => state.uiState);
@@ -12,61 +19,134 @@ export function GlobalSidebar() {
 
   if (!uiState) {
     return (
-      <div className="sidebar h-full">
-        <div className="p-4 text-center text-muted-foreground">
-          No job selected
+      <div className="h-full border-r bg-card/30 backdrop-blur-xl p-6 flex items-center justify-center text-muted-foreground">
+        <div className="text-center space-y-2">
+          <div className="w-12 h-12 rounded-full bg-white/5 mx-auto flex items-center justify-center">?</div>
+          <p>No Active Job</p>
         </div>
       </div>
     );
   }
 
-  const { job, phase, mistakes, planning_answers } = uiState;
+  const { job, mistakes, planning_answers } = uiState;
+  const statusPill = useMemo(() => {
+    const status = job.status;
+    const base =
+      'inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-[10px] font-bold tracking-widest font-mono';
+
+    if (status === 'EXECUTING') {
+      return {
+        label: 'EXECUTING',
+        className:
+          base +
+          ' bg-primary/15 border-primary/30 text-primary shadow-[0_0_14px_rgba(59,130,246,0.28)]',
+        dot: 'bg-primary shadow-[0_0_10px_rgba(59,130,246,0.6)] animate-pulse',
+      };
+    }
+    if (status === 'PLANNING') {
+      return {
+        label: 'PLANNING',
+        className:
+          base +
+          ' bg-yellow-500/15 border-yellow-500/30 text-yellow-300 shadow-[0_0_12px_rgba(234,179,8,0.18)]',
+        dot: 'bg-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.5)]',
+      };
+    }
+    if (status === 'READY') {
+      return {
+        label: 'READY',
+        className:
+          base +
+          ' bg-emerald-500/15 border-emerald-500/30 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.18)]',
+        dot: 'bg-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.5)]',
+      };
+    }
+    if (status === 'PAUSED') {
+      return {
+        label: 'PAUSED',
+        className:
+          base +
+          ' bg-yellow-500/15 border-yellow-500/30 text-yellow-300 shadow-[0_0_12px_rgba(234,179,8,0.18)]',
+        dot: 'bg-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.5)]',
+      };
+    }
+    if (status === 'FAILED') {
+      return {
+        label: 'FAILED',
+        className:
+          base +
+          ' bg-red-500/15 border-red-500/30 text-red-300 shadow-[0_0_12px_rgba(239,68,68,0.18)]',
+        dot: 'bg-red-400 shadow-[0_0_10px_rgba(239,68,68,0.5)]',
+      };
+    }
+    if (status === 'COMPLETE') {
+      return {
+        label: 'COMPLETE',
+        className:
+          base +
+          ' bg-emerald-500/15 border-emerald-500/30 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.18)]',
+        dot: 'bg-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.5)]',
+      };
+    }
+
+    return {
+      label: status,
+      className: base + ' bg-white/5 border-white/10 text-white/70',
+      dot: 'bg-white/50',
+    };
+  }, [job.status]);
 
   return (
-    <div className="sidebar h-full overflow-hidden flex flex-col">
-      {/* Job Header */}
-      <div className="sidebar-section">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <h2 className="font-semibold truncate">{job.title}</h2>
-            <p className="text-sm text-muted-foreground truncate-2">
-              {job.goal}
-            </p>
+    <div className="h-full border-r border-white/5 bg-card/60 backdrop-blur-2xl flex flex-col text-sm font-sans">
+      {/* HUD Header */}
+      <div className="p-4 border-b border-white/5 bg-black/20">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={cn('w-2 h-2 rounded-full', statusPill.dot)} />
+          <div className="min-w-0">
+            <h2 className="font-bold tracking-tight text-white/90 truncate">{job.title}</h2>
+            <p className="text-xs text-muted-foreground truncate font-mono mt-0.5">{job.job_id.slice(0, 8)}</p>
           </div>
-          <StatusBadge status={job.status} />
+          </div>
+          <div className={statusPill.className}>{statusPill.label}</div>
         </div>
       </div>
 
-      {/* Section Tabs */}
-      <div className="flex border-b">
+      {/* Navigation Tabs */}
+      <div className="flex p-1 gap-1 m-2 bg-black/20 rounded-lg border border-white/5">
         <SidebarTab
           active={sidebar.activeSection === 'metadata'}
           onClick={() => setSidebarSection('metadata')}
+          icon={<BookOpenIcon className="w-4 h-4" />}
           label="Info"
         />
         <SidebarTab
           active={sidebar.activeSection === 'invariants'}
           onClick={() => setSidebarSection('invariants')}
+          icon={<ShieldCheckIcon className="w-4 h-4" />}
           label="Rules"
           count={job.invariants?.length}
         />
         <SidebarTab
           active={sidebar.activeSection === 'mistakes'}
           onClick={() => setSidebarSection('mistakes')}
-          label="Mistakes"
+          icon={<ExclamationTriangleIcon className="w-4 h-4" />}
+          label="Errors"
           count={mistakes.length}
+          alert={mistakes.length > 0}
         />
         <SidebarTab
           active={sidebar.activeSection === 'context'}
           onClick={() => setSidebarSection('context')}
-          label="Context"
+          icon={<ServerStackIcon className="w-4 h-4" />}
+          label="Ctx"
         />
       </div>
 
-      {/* Section Content */}
-      <div className="flex-1 overflow-auto">
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 space-y-2 custom-scrollbar">
         {sidebar.activeSection === 'metadata' && (
-          <MetadataSection job={job} phase={phase} planningAnswers={planning_answers} />
+          <MetadataSection job={job} planningAnswers={planning_answers} />
         )}
         {sidebar.activeSection === 'invariants' && (
           <InvariantsSection invariants={job.invariants || []} />
@@ -78,350 +158,329 @@ export function GlobalSidebar() {
           <ContextSection uiState={uiState} />
         )}
       </div>
+
+      {/* Footer / Status */}
+      <div className="p-3 border-t border-white/5 bg-black/10 text-xs text-muted-foreground font-mono flex justify-between">
+        <span>VibeDev v0.1</span>
+        <span>{formatDate(new Date().toISOString())}</span>
+      </div>
     </div>
   );
 }
 
-// =============================================================================
+// -----------------------------------------------------------------------------
 // Sub-components
-// =============================================================================
+// -----------------------------------------------------------------------------
 
-function SidebarTab({
-  active,
-  onClick,
-  label,
-  count,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count?: number;
-}) {
+function SidebarTab({ active, onClick, icon, label, count, alert }: any) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        'flex-1 px-3 py-2 text-sm font-medium transition-colors relative',
-        active
-          ? 'text-primary border-b-2 border-primary'
-          : 'text-muted-foreground hover:text-foreground'
+        "flex-1 flex flex-col items-center justify-center py-2 rounded-md transition-all duration-200 relative group",
+        active ? "bg-primary/20 text-primary shadow-sm ring-1 ring-primary/50" : "hover:bg-white/5 text-muted-foreground hover:text-white"
       )}
     >
-      {label}
+      {icon}
+      <span className="text-[10px] mt-1 font-medium">{label}</span>
       {count !== undefined && count > 0 && (
-        <span className="ml-1 text-xs bg-muted px-1.5 py-0.5 rounded-full">
+        <span className={cn(
+          "absolute top-0.5 right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold border border-black/50 shadow-sm",
+          alert ? "bg-red-500 text-white" : "bg-muted text-white"
+        )}>
           {count}
         </span>
       )}
     </button>
-  );
+  )
 }
 
-function StatusBadge({ status }: { status: string }) {
+function SectionHeader({ title }: { title: string }) {
   return (
-    <span
-      className={cn(
-        'px-2 py-0.5 rounded-full text-xs font-medium',
-        `badge-${status.toLowerCase()}`
-      )}
-    >
-      {status}
-    </span>
-  );
+    <h3 className="text-xs uppercase tracking-wider text-muted-foreground font-bold mb-3 pl-1 border-l-2 border-primary/50">
+      {title}
+    </h3>
+  )
 }
 
-function MetadataSection({
-  job,
-  phase,
-  planningAnswers,
-}: {
-  job: any;
-  phase: any;
-  planningAnswers: Record<string, any>;
-}) {
+function MetadataSection({ job, planningAnswers }: any) {
   return (
-    <div className="p-4 space-y-4">
-      {/* Phase Progress */}
+    <div className="space-y-6 p-2 animate-fade-in">
       <div>
-        <h3 className="text-sm font-medium mb-2">Planning Progress</h3>
-        <div className="space-y-2">
-          <PhaseIndicator
-            name="Intent & Scope"
-            phase={1}
-            currentPhase={phase.current_phase}
-          />
-          <PhaseIndicator
-            name="Deliverables"
-            phase={2}
-            currentPhase={phase.current_phase}
-          />
-          <PhaseIndicator
-            name="Invariants"
-            phase={3}
-            currentPhase={phase.current_phase}
-          />
-          {phase.has_repo && (
-            <PhaseIndicator
-              name="Repo Context"
-              phase={4}
-              currentPhase={phase.current_phase}
-            />
-          )}
-          <PhaseIndicator
-            name="Plan Steps"
-            phase={5}
-            currentPhase={phase.current_phase}
-          />
+        <SectionHeader title="Objective" />
+        <div className="p-3 bg-white/5 rounded-lg border border-white/5 text-sm leading-relaxed text-white/80">
+          {job.goal}
         </div>
       </div>
 
-      {/* Key Info */}
-      <div>
-        <h3 className="text-sm font-medium mb-2">Job Details</h3>
-        <dl className="text-sm space-y-1">
-          <InfoRow label="Job ID" value={job.job_id.slice(0, 8)} />
-          <InfoRow label="Created" value={formatDate(job.created_at)} />
-          {job.repo_root && (
-            <InfoRow label="Repo" value={job.repo_root} truncate />
-          )}
-          {planningAnswers.target_environment && (
-            <InfoRow
-              label="Environment"
-              value={planningAnswers.target_environment}
-              truncate
-            />
-          )}
-          {planningAnswers.timeline_priority && (
-            <InfoRow
-              label="Priority"
-              value={planningAnswers.timeline_priority}
-            />
-          )}
-        </dl>
-      </div>
-
-      {/* Deliverables */}
-      {job.deliverables?.length > 0 && (
+      {(planningAnswers?.target_environment || planningAnswers?.timeline_priority) && (
         <div>
-          <h3 className="text-sm font-medium mb-2">Deliverables</h3>
-          <ul className="text-sm space-y-1">
-            {job.deliverables.map((d: string, i: number) => (
-              <li key={i} className="flex items-start gap-2">
-                <span className="text-muted-foreground">•</span>
-                <span>{d}</span>
-              </li>
-            ))}
-          </ul>
+          <SectionHeader title="Context" />
+          <div className="grid grid-cols-2 gap-2">
+            {planningAnswers?.target_environment && (
+              <div className="p-3 bg-white/5 rounded-lg border border-white/5">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                  Environment
+                </div>
+                <div className="mt-1 text-sm text-white/80 truncate">
+                  {String(planningAnswers.target_environment)}
+                </div>
+              </div>
+            )}
+            {planningAnswers?.timeline_priority && (
+              <div className="p-3 bg-white/5 rounded-lg border border-white/5">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                  Priority
+                </div>
+                <div className="mt-1 text-sm text-white/80 truncate">
+                  {String(planningAnswers.timeline_priority)}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Definition of Done */}
+      <div>
+        <SectionHeader title="Deliverables" />
+        <ul className="space-y-2">
+          {job.deliverables?.map((d: string, i: number) => (
+            <li key={i} className="flex gap-3 text-sm group">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary/50 mt-1.5 group-hover:bg-primary transition-colors" />
+              <span className="text-muted-foreground group-hover:text-white transition-colors">{d}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
       {job.definition_of_done?.length > 0 && (
         <div>
-          <h3 className="text-sm font-medium mb-2">Definition of Done</h3>
-          <ul className="text-sm space-y-1">
+          <SectionHeader title="Definition of Done" />
+          <div className="space-y-1">
             {job.definition_of_done.map((d: string, i: number) => (
-              <li key={i} className="flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  disabled
-                  className="mt-0.5 rounded border-gray-300"
-                />
-                <span>{d}</span>
-              </li>
+              <div key={i} className="flex items-center gap-2 p-2 rounded hover:bg-white/5 transition-colors cursor-default">
+                <div className="w-4 h-4 rounded border border-white/20 flex items-center justify-center">
+                  <div className="w-2 h-2 bg-transparent" />
+                </div>
+                <span className="text-sm text-muted-foreground">{d}</span>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function PhaseIndicator({
-  name,
-  phase,
-  currentPhase,
-}: {
-  name: string;
-  phase: number;
-  currentPhase: number;
-}) {
-  const isComplete = phase < currentPhase;
-  const isCurrent = phase === currentPhase;
-
-  return (
-    <div className="flex items-center gap-2">
-      <div
-        className={cn(
-          'h-5 w-5 rounded-full flex items-center justify-center text-xs',
-          isComplete && 'bg-green-500 text-white',
-          isCurrent && 'bg-blue-500 text-white pulse-active',
-          !isComplete && !isCurrent && 'bg-muted text-muted-foreground'
-        )}
-      >
-        {isComplete ? '✓' : phase}
-      </div>
-      <span
-        className={cn(
-          'text-sm',
-          isCurrent && 'font-medium',
-          !isComplete && !isCurrent && 'text-muted-foreground'
-        )}
-      >
-        {name}
-      </span>
-    </div>
-  );
-}
-
-function InfoRow({
-  label,
-  value,
-  truncate,
-}: {
-  label: string;
-  value: string;
-  truncate?: boolean;
-}) {
-  return (
-    <div className="flex justify-between gap-2">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn('text-right', truncate && 'truncate max-w-[150px]')}>
-        {value}
-      </dd>
     </div>
   );
 }
 
 function InvariantsSection({ invariants }: { invariants: string[] }) {
-  if (invariants.length === 0) {
-    return (
-      <div className="p-4 text-center text-muted-foreground">
-        <p>No invariants defined yet.</p>
-        <p className="text-sm mt-1">
-          Invariants are non-negotiable rules that must be followed.
-        </p>
-      </div>
-    );
-  }
+  if (invariants.length === 0) return <EmptyPlaceholder text="No active rules" />;
 
   return (
-    <div className="p-4">
-      <div className="space-y-2">
-        {invariants.map((inv, i) => (
-          <div
-            key={i}
-            className="flex items-start gap-2 p-2 rounded-md bg-orange-50 border border-orange-200 dark:bg-orange-900/20 dark:border-orange-800"
-          >
-            <span className="text-orange-500">⚠️</span>
-            <span className="text-sm">{inv}</span>
-          </div>
-        ))}
+    <div className="space-y-2 p-2 animate-fade-in">
+      <div className="text-xs text-muted-foreground mb-4 px-1">
+        These rules are injected into every prompt to guarantee compliance.
       </div>
-    </div>
-  );
-}
-
-function MistakesSection({ mistakes }: { mistakes: any[] }) {
-  if (mistakes.length === 0) {
-    return (
-      <div className="p-4 text-center text-muted-foreground">
-        <p>No mistakes recorded.</p>
-        <p className="text-sm mt-1">
-          Mistakes help the AI learn and avoid repeating errors.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-4 space-y-3">
-      {mistakes.map((mistake) => (
-        <div
-          key={mistake.mistake_id}
-          className="p-3 rounded-lg border bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
-        >
-          <h4 className="font-medium text-sm mb-1">{mistake.title}</h4>
-          <p className="text-xs text-muted-foreground mb-2">
-            {mistake.lesson}
-          </p>
-          {mistake.tags?.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {mistake.tags.map((tag: string) => (
-                <span
-                  key={tag}
-                  className="px-1.5 py-0.5 text-xs rounded bg-red-100 dark:bg-red-800/50"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          )}
+      {invariants.map((inv, i) => (
+        <div key={i} className="flex gap-3 p-3 bg-red-500/5 border border-red-500/20 rounded-lg hover:border-red-500/40 transition-colors">
+          <ShieldCheckIcon className="w-5 h-5 text-red-400 shrink-0" />
+          <span className="text-sm text-red-100/80">{inv}</span>
         </div>
       ))}
     </div>
   );
 }
 
-function ContextSection({ uiState }: { uiState: any }) {
-  const { context_block_count, repo_map, git_status } = uiState;
+function MistakesSection({ mistakes }: { mistakes: any[] }) {
+  if (mistakes.length === 0) return <EmptyPlaceholder text="No recorded mistakes" />;
 
   return (
-    <div className="p-4 space-y-4">
-      {/* Context Blocks */}
-      <div>
-        <h3 className="text-sm font-medium mb-2">Context Blocks</h3>
-        <p className="text-sm text-muted-foreground">
-          {context_block_count} blocks stored
-        </p>
-      </div>
-
-      {/* Repo Map */}
-      {repo_map?.length > 0 && (
-        <div>
-          <h3 className="text-sm font-medium mb-2">Repo Map</h3>
-          <ul className="text-sm space-y-1 max-h-40 overflow-auto">
-            {repo_map.slice(0, 10).map((entry: any, i: number) => (
-              <li key={i} className="text-muted-foreground truncate">
-                {entry.path}
-              </li>
-            ))}
-            {repo_map.length > 10 && (
-              <li className="text-muted-foreground italic">
-                +{repo_map.length - 10} more files
-              </li>
-            )}
-          </ul>
+    <div className="space-y-3 p-2 animate-fade-in">
+      {mistakes.map((m) => (
+        <div key={m.mistake_id} className="p-3 bg-orange-500/5 border border-orange-500/20 rounded-lg hover:bg-orange-500/10 transition-colors cursor-pointer group">
+          <div className="flex items-center gap-2 mb-2">
+            <ExclamationTriangleIcon className="w-4 h-4 text-orange-400" />
+            <span className="font-semibold text-orange-200 text-sm group-hover:underline">{m.title}</span>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">{m.lesson}</p>
         </div>
-      )}
+      ))}
+    </div>
+  )
+}
 
-      {/* Git Status */}
-      {git_status?.ok && (
-        <div>
-          <h3 className="text-sm font-medium mb-2">Git Status</h3>
-          {git_status.clean ? (
-            <p className="text-sm text-green-600">Working tree clean</p>
-          ) : (
-            <div className="text-sm space-y-1">
-              {git_status.modified?.length > 0 && (
-                <p className="text-yellow-600">
-                  {git_status.modified.length} modified
-                </p>
-              )}
-              {git_status.added?.length > 0 && (
-                <p className="text-green-600">
-                  {git_status.added.length} added
-                </p>
-              )}
-              {git_status.deleted?.length > 0 && (
-                <p className="text-red-600">
-                  {git_status.deleted.length} deleted
-                </p>
-              )}
+function ContextSection({ uiState }: { uiState: any }) {
+  const { repo_map } = uiState;
+  const [filter, setFilter] = useState('');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const normalizedPaths = useMemo<string[]>(() => {
+    const raw = (repo_map || []).map((e: any) => String(e.path || '')).filter(Boolean);
+    return raw.map((p: string) => p.split('\\').join('/'));
+  }, [repo_map]);
+
+  type TreeNode = {
+    type: 'dir' | 'file';
+    name: string;
+    path: string;
+    children?: TreeNode[];
+  };
+
+  const tree = useMemo<TreeNode>(() => {
+    const root: TreeNode = { type: 'dir', name: '', path: '', children: [] };
+
+    const ensureChildDir = (parent: TreeNode, name: string, path: string) => {
+      const existing = parent.children?.find((c) => c.type === 'dir' && c.name === name);
+      if (existing) return existing;
+      const created: TreeNode = { type: 'dir', name, path, children: [] };
+      parent.children?.push(created);
+      return created;
+    };
+
+    for (const fullPath of normalizedPaths) {
+      const parts = fullPath.split('/').filter(Boolean);
+      if (parts.length === 0) continue;
+
+      let cursor = root;
+      for (let i = 0; i < parts.length; i += 1) {
+        const name = parts[i];
+        const cursorPath = parts.slice(0, i + 1).join('/');
+
+        const isLeaf = i === parts.length - 1;
+        if (isLeaf) {
+          cursor.children?.push({ type: 'file', name, path: cursorPath });
+        } else {
+          cursor = ensureChildDir(cursor, name, cursorPath);
+        }
+      }
+    }
+
+    const sortTree = (node: TreeNode) => {
+      if (!node.children) return;
+      node.children.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      node.children.forEach(sortTree);
+    };
+    sortTree(root);
+
+    return root;
+  }, [normalizedPaths]);
+
+  const filtered = useMemo<string[]>(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return [];
+    return normalizedPaths.filter((p) => p.toLowerCase().includes(q)).slice(0, 120);
+  }, [filter, normalizedPaths]);
+
+  const toggle = (path: string, current: boolean) => {
+    setCollapsed((prev) => ({ ...prev, [path]: !current }));
+  };
+
+  const renderNode = (node: TreeNode, depth: number) => {
+    if (node.type === 'file') {
+      return (
+        <button
+          key={node.path}
+          type="button"
+          onClick={() => navigator.clipboard.writeText(node.path)}
+          className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 group transition-colors"
+          title="Click to copy path"
+        >
+          <span
+            className="text-xs font-mono text-muted-foreground group-hover:text-primary transition-colors truncate"
+            style={{ paddingLeft: depth * 10 }}
+          >
+            {node.name}
+          </span>
+        </button>
+      );
+    }
+
+    const has = Object.prototype.hasOwnProperty.call(collapsed, node.path);
+    const isCollapsed = has ? collapsed[node.path] : depth >= 2;
+    return (
+      <div key={node.path || '__root'} className="space-y-0.5">
+        {node.path && (
+          <button
+            type="button"
+            onClick={() => toggle(node.path, isCollapsed)}
+            className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 transition-colors group"
+          >
+            <span
+              className="text-[10px] uppercase tracking-wider text-white/70 group-hover:text-white/90"
+              style={{ paddingLeft: depth * 10 }}
+            >
+              {isCollapsed ? '▸' : '▾'} {node.name}
+            </span>
+            <span className="text-[10px] text-muted-foreground/70 ml-auto">
+              {node.children?.length ?? 0}
+            </span>
+          </button>
+        )}
+
+        {!isCollapsed &&
+          node.children?.map((c) => renderNode(c, node.path ? depth + 1 : depth))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="p-2 animate-fade-in space-y-6">
+      <div>
+        <SectionHeader title="Active Repo Map" />
+
+        <div className="mb-3 px-1">
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter paths..."
+            className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white/80 placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-all"
+          />
+          <div className="mt-2 text-[10px] text-muted-foreground/70">
+            Click an entry to copy its path.
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          {filter.trim() ? (
+            filtered.length === 0 ? (
+              <div className="text-xs text-muted-foreground/60 font-mono bg-black/20 border border-white/5 rounded-lg p-3">
+                No matches.
+              </div>
+            ) : (
+              filtered.map((p: string) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(p)}
+                  className="w-full text-left px-2 py-1.5 rounded hover:bg-white/5 group transition-colors"
+                  title="Click to copy path"
+                >
+                  <span className="text-xs font-mono text-muted-foreground group-hover:text-primary transition-colors truncate">
+                    {p}
+                  </span>
+                </button>
+              ))
+            )
+          ) : normalizedPaths.length === 0 ? (
+            <div className="text-xs text-muted-foreground/60 font-mono bg-black/20 border border-white/5 rounded-lg p-3">
+              Repo map is empty.
             </div>
+          ) : (
+            renderNode(tree, 0)
           )}
         </div>
-      )}
+      </div>
     </div>
-  );
+  )
+}
+
+function EmptyPlaceholder({ text }: { text: string }) {
+  return (
+    <div className="h-full flex flex-col items-center justify-center text-muted-foreground/50 p-8 text-center border-2 border-dashed border-white/5 rounded-xl m-2">
+      <div className="text-2xl mb-2">∅</div>
+      <div className="text-sm font-medium">{text}</div>
+    </div>
+  )
 }

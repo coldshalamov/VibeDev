@@ -124,10 +124,104 @@ async def _run_runner(*, job_id: str, evidence_path: str | None, model_claim: st
         await store.close()
 
 
+async def _status_job(*, job_id: str) -> int:
+    """Show the current status of a job."""
+    db_path = Path(os.environ.get("VIBEDEV_DB_PATH", str(_default_db_path())))
+    store = await VibeDevStore.open(db_path)
+    try:
+        try:
+            job = await store.job_get(job_id)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+
+        steps = await store.job_list_steps(job_id)
+
+        # Header
+        print(f"\n{'='*60}")
+        print(f"Job: {job['title']}")
+        print(f"ID:  {job_id}")
+        print(f"{'='*60}")
+
+        # Status
+        status = job.get("status", "UNKNOWN")
+        status_colors = {
+            "PLANNING": "🟡",
+            "READY": "🟢",
+            "EXECUTING": "🔵",
+            "PAUSED": "🟠",
+            "COMPLETED": "✅",
+            "FAILED": "❌",
+        }
+        print(f"\nStatus: {status_colors.get(status, '⚪')} {status}")
+
+        # Phase info (if planning)
+        if status == "PLANNING":
+            phase = job.get("planning_answers", {})
+            print(f"Planning answers collected: {len(phase)}")
+
+        # Step progress
+        done = sum(1 for s in steps if s.get("status") == "DONE")
+        failed = sum(1 for s in steps if s.get("status") == "FAILED")
+        active = sum(1 for s in steps if s.get("status") == "ACTIVE")
+        pending = sum(1 for s in steps if s.get("status") == "PENDING")
+
+        print(f"\nSteps: {len(steps)} total")
+        print(f"  ✅ Done:    {done}")
+        print(f"  🔵 Active:  {active}")
+        print(f"  ⏳ Pending: {pending}")
+        print(f"  ❌ Failed:  {failed}")
+
+        # Current step details
+        active_steps = [s for s in steps if s.get("status") == "ACTIVE"]
+        if active_steps:
+            current = active_steps[0]
+            print(f"\n--- Current Step ---")
+            print(f"Title: {current.get('title', 'Untitled')}")
+            print(f"Attempts: {current.get('attempt_count', 0)}")
+
+        # Mistakes
+        mistakes = await store.mistake_list(job_id)
+        if mistakes:
+            print(f"\n⚠️  Recorded Mistakes: {len(mistakes)}")
+            for m in mistakes[:3]:  # Show first 3
+                print(f"  - {m.get('description', 'No description')[:60]}...")
+
+        print()
+        return 0
+    finally:
+        await store.close()
+
+
+async def _list_jobs(*, status_filter: str | None, limit: int) -> int:
+    """List all jobs, optionally filtered by status."""
+    db_path = Path(os.environ.get("VIBEDEV_DB_PATH", str(_default_db_path())))
+    store = await VibeDevStore.open(db_path)
+    try:
+        jobs = await store.job_list(status=status_filter, limit=limit)
+
+        if not jobs:
+            print("No jobs found.")
+            return 0
+
+        print(f"\n{'ID':<36} {'Status':<12} {'Title'}")
+        print("-" * 80)
+        for job in jobs:
+            status = job.get("status", "UNKNOWN")
+            title = job.get("title", "Untitled")[:40]
+            job_id = job.get("job_id", "???")
+            print(f"{job_id:<36} {status:<12} {title}")
+        print()
+        return 0
+    finally:
+        await store.close()
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="vibedev")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    # Runner command
     runner = sub.add_parser("runner", help="Run an evidence-gated job loop")
     runner.add_argument("--job", required=True, help="Job ID to execute")
     runner.add_argument(
@@ -136,6 +230,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     runner.add_argument("--model-claim", default="MET", choices=["MET", "NOT_MET", "PARTIAL"])
     runner.add_argument("--summary", help="Attempt summary (defaults from evidence.diff_summary)")
+
+    # Status command
+    status_cmd = sub.add_parser("status", help="Show current status of a job")
+    status_cmd.add_argument("job_id", help="Job ID to check")
+
+    # List command
+    list_cmd = sub.add_parser("list", help="List all jobs")
+    list_cmd.add_argument("--status", choices=["PLANNING", "READY", "EXECUTING", "PAUSED", "COMPLETED", "FAILED"],
+                          help="Filter by status")
+    list_cmd.add_argument("--limit", type=int, default=20, help="Max jobs to show (default: 20)")
 
     args = parser.parse_args(argv)
 
@@ -150,8 +254,17 @@ def main(argv: list[str] | None = None) -> None:
         )
         raise SystemExit(code)
 
+    if args.command == "status":
+        code = asyncio.run(_status_job(job_id=str(args.job_id)))
+        raise SystemExit(code)
+
+    if args.command == "list":
+        code = asyncio.run(_list_jobs(status_filter=args.status, limit=args.limit))
+        raise SystemExit(code)
+
     raise SystemExit(2)
 
 
 if __name__ == "__main__":
     main()
+

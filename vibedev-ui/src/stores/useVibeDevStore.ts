@@ -11,7 +11,7 @@ import type { UIState, JobStatus } from '@/types';
 // =============================================================================
 
 interface ViewMode {
-  mode: 'planning' | 'execution' | 'review';
+  mode: 'research' | 'planning' | 'execution' | 'review';
 }
 
 interface SidebarState {

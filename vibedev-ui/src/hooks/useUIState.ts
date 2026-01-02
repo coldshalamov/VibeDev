@@ -220,6 +220,7 @@ export function useProposeSteps(jobId: string) {
   return useMutation({
     mutationFn: (
       steps: Array<{
+        step_id?: string;
         title: string;
         instruction_prompt: string;
         acceptance_criteria?: string[];

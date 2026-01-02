@@ -8,6 +8,7 @@ import { useUIState } from '@/hooks/useUIState';
 import { useJobEvents } from '@/hooks/useJobEvents';
 import { GlobalSidebar } from '@/components/GlobalSidebar';
 import { MainCanvas } from '@/components/MainCanvas';
+import { ResearchDashboard } from '@/components/ResearchDashboard';
 import { ExecutionDashboard } from '@/components/ExecutionDashboard';
 import { AutomationCockpit } from '@/components/AutomationCockpit';
 import { JobSelector } from '@/components/JobSelector';
@@ -105,6 +106,7 @@ function App() {
 
           {/* View Mode Tabs */}
           <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
+            <ViewModeTab mode="research" label="Research" />
             <ViewModeTab mode="planning" label="Planning" />
             <ViewModeTab mode="execution" label="Execution" />
             <ViewModeTab mode="review" label="Review" />
@@ -120,6 +122,8 @@ function App() {
         <div className="flex-1 overflow-auto">
           {!currentJobId ? (
             <EmptyState />
+          ) : viewMode === 'research' ? (
+            <ResearchDashboard />
           ) : viewMode === 'planning' ? (
             <MainCanvas />
           ) : viewMode === 'execution' ? (
@@ -137,7 +141,7 @@ function App() {
 // Sub-components
 // =============================================================================
 
-function ViewModeTab({ mode, label }: { mode: 'planning' | 'execution' | 'review'; label: string }) {
+function ViewModeTab({ mode, label }: { mode: 'research' | 'planning' | 'execution' | 'review'; label: string }) {
   const currentMode = useViewMode();
   const setViewMode = useVibeDevStore((state) => state.setViewMode);
 
@@ -210,9 +214,9 @@ function ReviewView() {
               key={step.step_id}
               className={cn(
                 'flex items-center gap-3 rounded-md p-2',
-                step.status === 'DONE' && 'bg-green-50 dark:bg-green-900/20', 
-                step.status === 'ACTIVE' && 'bg-blue-50 dark:bg-blue-900/20',     
-                step.status === 'PENDING' && 'bg-gray-50 dark:bg-gray-800/50'   
+                step.status === 'DONE' && 'bg-green-50 dark:bg-green-900/20',
+                step.status === 'ACTIVE' && 'bg-blue-50 dark:bg-blue-900/20',
+                step.status === 'PENDING' && 'bg-gray-50 dark:bg-gray-800/50'
               )}
             >
               <span className="text-muted-foreground text-sm w-6">{index + 1}.</span>
