@@ -2,7 +2,8 @@
 // Info Sidebar - Research Findings, Mistakes, Dev Log
 // =============================================================================
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { useClickOutside } from '@/hooks/useClickOutside';
 import { cn } from '@/lib/utils';
 import { useVibeDevStore } from '@/stores/useVibeDevStore';
 import {
@@ -209,6 +210,8 @@ function FindingsPanel({
     const [adding, setAdding] = useState(false);
     const [title, setTitle] = useState('');
     const [content, setContent] = useState('');
+    const containerRef = useRef<HTMLDivElement>(null);
+    useClickOutside(containerRef, () => setAdding(false));
 
     const handleAdd = () => {
         if (!title.trim()) return;
@@ -225,7 +228,7 @@ function FindingsPanel({
     };
 
     return (
-        <div className="p-3 space-y-3">
+        <div className="p-3 space-y-3" ref={containerRef}>
             <div className="flex items-center justify-between">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
                     Research results used for context
@@ -308,6 +311,8 @@ function MistakesPanel({
     const [title, setTitle] = useState('');
     const [whatHappened, setWhatHappened] = useState('');
     const [lesson, setLesson] = useState('');
+    const containerRef = useRef<HTMLDivElement>(null);
+    useClickOutside(containerRef, () => setAdding(false));
 
     const handleAdd = () => {
         if (!title.trim()) return;
@@ -325,7 +330,7 @@ function MistakesPanel({
     };
 
     return (
-        <div className="p-3 space-y-3">
+        <div className="p-3 space-y-3" ref={containerRef}>
             <div className="flex items-center justify-between">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
                     Errors and lessons learned

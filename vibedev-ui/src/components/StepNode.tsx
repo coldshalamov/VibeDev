@@ -1,4 +1,5 @@
-import { memo } from 'react';
+import { memo, useState, useRef } from 'react';
+import { useClickOutside } from '@/hooks/useClickOutside';
 import { Handle, Position, type Node, NodeProps } from '@xyflow/react';
 import { cn } from '@/lib/utils';
 import {
@@ -24,14 +25,20 @@ export type StepNodeData = {
 export type StepFlowNode = Node<StepNodeData, 'step'>;
 
 export const StepNode = memo(({ data, selected }: NodeProps<StepFlowNode>) => {
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const deleteRef = useRef<HTMLDivElement>(null);
+    useClickOutside(deleteRef, () => setIsConfirmingDelete(false));
+
     return (
-        <div className={cn(
-            "glass-panel rounded-xl border-2 transition-all duration-300 min-w-[250px] shadow-lg animate-fade-in",
-            selected ? "border-primary ring-2 ring-primary/20 bg-black/40" : "border-white/10 hover:border-white/30 bg-black/20",
-            data.status === 'DONE' && "border-green-500/50 shadow-green-500/10",
-            data.status === 'ACTIVE' && "border-blue-500 shadow-blue-500/20",
-            data.status === 'SKIPPED' && "opacity-50 grayscale"
-        )}>
+        <div
+            ref={deleteRef}
+            className={cn(
+                "glass-panel rounded-xl border-2 transition-all duration-300 min-w-[250px] shadow-lg animate-fade-in",
+                selected ? "border-primary ring-2 ring-primary/20 bg-black/40" : "border-white/10 hover:border-white/30 bg-black/20",
+                data.status === 'DONE' && "border-green-500/50 shadow-green-500/10",
+                data.status === 'ACTIVE' && "border-blue-500 shadow-blue-500/20",
+                data.status === 'SKIPPED' && "opacity-50 grayscale"
+            )}>
             {/* Input Handle */}
             {!data.isStart && (
                 <Handle
@@ -64,12 +71,35 @@ export const StepNode = memo(({ data, selected }: NodeProps<StepFlowNode>) => {
                     />
                 </div>
                 {data.onDelete && !data.isStart && (
-                    <button
-                        onClick={data.onDelete}
-                        className="text-muted-foreground hover:text-red-400 transition-colors p-1 rounded hover:bg-white/5"
-                    >
-                        <TrashIcon className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center">
+                        {isConfirmingDelete ? (
+                            <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-1 duration-200">
+                                <span className="text-[9px] font-bold text-red-400 uppercase tracking-tighter">Sure?</span>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); data.onDelete?.(); }}
+                                    className="p-1 bg-red-500/20 hover:bg-red-500 text-white rounded transition-all"
+                                    title="Yes, delete"
+                                >
+                                    <TrashIcon className="w-4 h-4" />
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(false); }}
+                                    className="p-1 hover:bg-white/10 text-muted-foreground rounded"
+                                    title="Cancel"
+                                >
+                                    <span className="text-xs px-1">✕</span>
+                                </button>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(true); }}
+                                className="text-muted-foreground hover:text-red-400 transition-colors p-1 rounded hover:bg-white/5"
+                                title="Delete step"
+                            >
+                                <TrashIcon className="w-4 h-4" />
+                            </button>
+                        )}
+                    </div>
                 )}
             </div>
 

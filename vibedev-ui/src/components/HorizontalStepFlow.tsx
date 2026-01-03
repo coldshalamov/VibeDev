@@ -7,6 +7,7 @@
 // - Features: Atomic horizontal dragging, snapped grid, visual flow arrows.
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useClickOutside } from '@/hooks/useClickOutside';
 import { cn } from '@/lib/utils';
 import {
     PlusIcon,
@@ -206,6 +207,9 @@ function StepCard({
     onSelect: () => void;
     onDragStart: (e: React.MouseEvent) => void;
 }) {
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const deleteRef = useRef<HTMLDivElement>(null);
+    useClickOutside(deleteRef, () => setIsConfirmingDelete(false));
     const [showCode, setShowCode] = useState(false);
     const [expanded, setExpanded] = useState(false);
 
@@ -237,6 +241,7 @@ function StepCard({
 
     return (
         <div
+            ref={deleteRef}
             className={cn(
                 "w-[280px] rounded-xl border-2 transition-shadow duration-200 bg-card/80 backdrop-blur-md select-none",
                 borderColor,
@@ -266,12 +271,34 @@ function StepCard({
                     </div>
                     <span className="text-xs font-bold text-muted-foreground">{step.label}</span>
                 </div>
-                <button
-                    onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                    className="p-1 hover:bg-red-500/20 text-red-400 rounded opacity-50 hover:opacity-100"
-                >
-                    <TrashIcon className="w-3 h-3" />
-                </button>
+
+                {isConfirmingDelete ? (
+                    <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-1 duration-200">
+                        <span className="text-[9px] font-bold text-red-400 uppercase tracking-tighter">Sure?</span>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                            className="p-1 bg-red-500/20 hover:bg-red-500 text-white rounded transition-all"
+                            title="Yes, delete"
+                        >
+                            <TrashIcon className="w-3 h-3" />
+                        </button>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(false); }}
+                            className="p-1 hover:bg-white/10 text-muted-foreground rounded"
+                            title="Cancel"
+                        >
+                            <XMarkIcon className="w-3 h-3" />
+                        </button>
+                    </div>
+                ) : (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(true); }}
+                        className="p-1 hover:bg-red-500/20 text-red-400 rounded opacity-50 hover:opacity-100 transition-all"
+                        title="Delete step"
+                    >
+                        <TrashIcon className="w-3 h-3" />
+                    </button>
+                )}
             </div>
 
             {/* Title */}
@@ -492,8 +519,11 @@ function StepCard({
 
 function AddStepButton({ onAdd }: { onAdd: (type: StepType) => void }) {
     const [open, setOpen] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+    useClickOutside(containerRef, () => setOpen(false));
+
     return (
-        <div className="relative z-20">
+        <div className="relative z-20" ref={containerRef}>
             <button
                 onClick={() => setOpen(!open)}
                 className="w-12 h-12 flex items-center justify-center rounded-xl border-2 border-dashed border-white/10 hover:border-primary/50 hover:bg-primary/5 text-muted-foreground hover:text-white transition-colors"
@@ -550,12 +580,15 @@ function FlowConnections({ steps }: { steps: Step[] }) {
 
                 const lines = [];
 
-                // 1. Next Step / On Pass (GREEN ARROW)
-                const nextId = step.onPass || step.nextStep;
+                // 1. Next Step / On Pass / Implicit (GREEN ARROW)
+                const nextId = step.onPass || step.nextStep || getSmartDefaultNext(step, steps);
                 if (nextId) {
                     const next = steps.find(s => s.id === nextId);
                     if (next) {
                         const end = getCoords(next);
+                        const isLoopBack = next.subThreadLevel !== step.subThreadLevel || next.colIndex <= step.colIndex;
+                        const isExplicit = !!(step.onPass || step.nextStep);
+
                         const endX = end.x + TX;
                         const endY = end.y + TY;
 
@@ -569,39 +602,11 @@ function FlowConnections({ steps }: { steps: Step[] }) {
                                 key={`next-${step.id}`}
                                 d={`M ${startX} ${startY} C ${cx1} ${cy1} ${cx2} ${cy2} ${endX} ${endY}`}
                                 stroke="#4ade80"
-                                strokeWidth="1.5"
+                                strokeWidth="2"
                                 fill="none"
+                                strokeOpacity="0.9"
                                 markerEnd="url(#arrowhead-green)"
                                 className="transition-all duration-300"
-                            />
-                        );
-                    }
-                } else {
-                    // Implicit linear next in the same thread?
-                    // User said: "no arrows going through the main thread... green arrows always showing where the next step is"
-                    // If nextStep is empty, it usually implies the next step in colIndex order.
-                    const sameLevel = steps.filter(s => s.subThreadLevel === step.subThreadLevel).sort((a, b) => a.colIndex - b.colIndex);
-                    const idx = sameLevel.findIndex(s => s.id === step.id);
-                    if (idx !== -1 && idx < sameLevel.length - 1) {
-                        const next = sameLevel[idx + 1];
-                        const end = getCoords(next);
-                        const endX = end.x + TX;
-                        const endY = end.y + TY;
-
-                        const cx1 = startX + 50;
-                        const cy1 = startY;
-                        const cx2 = endX - 50;
-                        const cy2 = endY;
-
-                        lines.push(
-                            <path
-                                key={`implicit-${step.id}`}
-                                d={`M ${startX} ${startY} C ${cx1} ${cy1} ${cx2} ${cy2} ${endX} ${endY}`}
-                                stroke="#4ade80"
-                                strokeWidth="1.5"
-                                fill="none"
-                                strokeOpacity="0.3" // Faded for implicit
-                                markerEnd="url(#arrowhead-green)"
                             />
                         );
                     }
@@ -627,10 +632,10 @@ function FlowConnections({ steps }: { steps: Step[] }) {
                                 key={`fail-${step.id}`}
                                 d={`M ${startX} ${startY} C ${cx1} ${cy1} ${cx2} ${cy2} ${cornerX} ${cornerY}`}
                                 stroke="#f87171"
-                                strokeWidth="1.5"
+                                strokeWidth="2"
                                 fill="none"
                                 markerEnd="url(#arrowhead-red)"
-                                opacity="0.95"
+                                strokeOpacity="0.9"
                             />
                         );
                     }
@@ -652,11 +657,41 @@ export function HorizontalStepFlow({ flow, onChange }: { flow: Flow, onChange: (
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
     const dragOrigin = useRef<{ x: number, y: number } | null>(null);
     const chainIds = useRef<string[]>([]);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     const steps = useMemo(() => normalizeLayout(flow.steps), [flow.steps]);
 
+    // Calculate valid columns for the current dragging level
+    const levelColumns = useMemo(() => {
+        if (!draggingId) return [];
+        const dragStep = steps.find(s => s.id === draggingId);
+        if (!dragStep) return [];
+
+        const lvl = dragStep.subThreadLevel ?? 0;
+        const levelSteps = steps.filter(s => s.subThreadLevel === lvl && !chainIds.current.includes(s.id));
+        const usedCols = new Set(levelSteps.map(s => s.colIndex ?? 0));
+
+        // Find max column to allow dragging to the end
+        const maxC = Math.max(5, ...steps.map(s => s.colIndex ?? 0)) + 5;
+        const valid = [];
+        for (let i = 0; i < maxC; i++) {
+            if (!usedCols.has(i)) valid.push(i);
+        }
+        return valid;
+    }, [draggingId, steps]);
+
+    const dragCol = draggingId ? Math.max(0, Math.round((steps.find(s => s.id === draggingId)!.colIndex! * COL_WIDTH + dragOffset.x) / COL_WIDTH)) : null;
+    const isDragOverValid = dragCol !== null && levelColumns.includes(dragCol);
+
     const maxLevel = Math.max(0, ...steps.map(s => s.subThreadLevel ?? 0));
-    const canvasHeight = (maxLevel + 2) * ROW_HEIGHT;
+    const canvasHeight = Math.max(600, (maxLevel + 1) * ROW_HEIGHT + 150);
+
+    // Initial scroll to bottom (main thread)
+    useEffect(() => {
+        if (containerRef.current) {
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+    }, [flow.name]); // Trigger on name/phase change
 
     const getVisualY = (level: number) => {
         return (maxLevel - level) * ROW_HEIGHT + 50;
@@ -682,24 +717,28 @@ export function HorizontalStepFlow({ flow, onChange }: { flow: Flow, onChange: (
     const handleMouseUp = useCallback(() => {
         if (!draggingId) return;
 
-        const deltaCol = Math.round(dragOffset.x / COL_WIDTH);
+        const dragStep = steps.find(s => s.id === draggingId);
+        if (dragStep) {
+            const targetCol = Math.round((dragStep.colIndex * COL_WIDTH + dragOffset.x) / COL_WIDTH);
+            const canDrop = levelColumns.includes(targetCol);
 
-        if (deltaCol !== 0) {
-            const chain = chainIds.current;
-            const newSteps = steps.map(s => {
-                if (chain.includes(s.id)) {
-                    let newCol = Math.max(0, (s.colIndex ?? 0) + deltaCol);
-                    return { ...s, colIndex: newCol };
-                }
-                return s;
-            });
-            onChange({ ...flow, steps: newSteps });
+            if (canDrop && targetCol !== dragStep.colIndex) {
+                const deltaCol = targetCol - dragStep.colIndex;
+                const chain = chainIds.current;
+                const newSteps = steps.map(s => {
+                    if (chain.includes(s.id)) {
+                        return { ...s, colIndex: Math.max(0, (s.colIndex ?? 0) + deltaCol) };
+                    }
+                    return s;
+                });
+                onChange({ ...flow, steps: newSteps });
+            }
         }
 
         setDraggingId(null);
         setDragOffset({ x: 0, y: 0 });
         chainIds.current = [];
-    }, [draggingId, dragOffset, steps, flow, onChange]);
+    }, [draggingId, dragOffset, steps, flow, onChange, levelColumns]);
 
     useEffect(() => {
         if (draggingId) {
@@ -782,8 +821,24 @@ export function HorizontalStepFlow({ flow, onChange }: { flow: Flow, onChange: (
             </div>
 
             {/* 2D Canvas */}
-            <div className="flex-1 overflow-auto relative cursor-grab active:cursor-grabbing" style={{ minHeight: canvasHeight }}>
-                <div className="absolute inset-0 min-w-[4000px] min-h-[2000px]">
+            <div
+                ref={containerRef}
+                className="flex-1 overflow-auto relative cursor-grab active:cursor-grabbing scroll-smooth"
+            >
+                <div
+                    className="relative min-w-[4000px] bg-dots-pattern"
+                    style={{ height: canvasHeight }}
+                >
+                    {/* Snap Guide / Drop Target */}
+                    {draggingId && isDragOverValid && (
+                        <div
+                            className="absolute w-[300px] h-[100px] border-2 border-dashed border-primary/40 bg-primary/20 rounded-xl z-0 transition-all duration-150 animate-pulse pointer-events-none"
+                            style={{
+                                transform: `translate(${dragCol! * COL_WIDTH - 10}px, ${getVisualY(steps.find(s => s.id === draggingId)!.subThreadLevel) - 10}px)`
+                            }}
+                        />
+                    )}
+
                     {/* SVG LAYER BEHIND NODES */}
                     <FlowConnections steps={steps} />
 

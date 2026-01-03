@@ -6,13 +6,15 @@
 // - BREAKPOINT: Start fresh thread with clean context
 // - CONDITION: Logic gate (hard=script, soft=LLM judgment)
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
+import { useClickOutside } from '@/hooks/useClickOutside';
 import { cn } from '@/lib/utils';
 import {
     PlusIcon,
     TrashIcon,
     ChevronDownIcon,
     ChevronUpIcon,
+    XMarkIcon,
     ArrowDownIcon,
     ArrowPathIcon,
     DocumentArrowDownIcon,
@@ -187,9 +189,12 @@ function PromptBlockEditor({
     isLast: boolean;
 }) {
     const [expanded, setExpanded] = useState(true);
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const deleteRef = useRef<HTMLDivElement>(null);
+    useClickOutside(deleteRef, () => setIsConfirmingDelete(false));
 
     return (
-        <div className="rounded-xl border border-primary/30 bg-primary/5 overflow-hidden">
+        <div className="rounded-xl border border-primary/30 bg-primary/5 overflow-hidden" ref={deleteRef}>
             {/* Header */}
             <div
                 className="flex items-center justify-between p-3 cursor-pointer hover:bg-primary/10 transition-colors"
@@ -218,9 +223,29 @@ function PromptBlockEditor({
                             <ChevronDownIcon className="w-4 h-4" />
                         </button>
                     )}
-                    <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1 hover:bg-red-500/20 text-red-400 rounded">
-                        <TrashIcon className="w-4 h-4" />
-                    </button>
+                    {isConfirmingDelete ? (
+                        <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-1 duration-200">
+                            <span className="text-[9px] font-bold text-red-400 uppercase tracking-tighter">Sure?</span>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                                className="p-1 bg-red-500/20 hover:bg-red-500 text-white rounded transition-all"
+                                title="Yes, delete"
+                            >
+                                <TrashIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(false); }}
+                                className="p-1 hover:bg-white/10 text-muted-foreground rounded"
+                                title="Cancel"
+                            >
+                                <XMarkIcon className="w-4 h-4" />
+                            </button>
+                        </div>
+                    ) : (
+                        <button onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(true); }} className="p-1 hover:bg-red-500/20 text-red-400 rounded">
+                            <TrashIcon className="w-4 h-4" />
+                        </button>
+                    )}
                     {expanded ? <ChevronUpIcon className="w-4 h-4" /> : <ChevronDownIcon className="w-4 h-4" />}
                 </div>
             </div>
@@ -300,8 +325,12 @@ function BreakpointBlockEditor({
     isFirst: boolean;
     isLast: boolean;
 }) {
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const deleteRef = useRef<HTMLDivElement>(null);
+    useClickOutside(deleteRef, () => setIsConfirmingDelete(false));
+
     return (
-        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/5 overflow-hidden">
+        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/5 overflow-hidden" ref={deleteRef}>
             <div className="flex items-center justify-between p-3">
                 <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-yellow-500/20 flex items-center justify-center text-yellow-400 font-bold text-sm">
@@ -321,9 +350,29 @@ function BreakpointBlockEditor({
                             <ChevronDownIcon className="w-4 h-4" />
                         </button>
                     )}
-                    <button onClick={onDelete} className="p-1 hover:bg-red-500/20 text-red-400 rounded">
-                        <TrashIcon className="w-4 h-4" />
-                    </button>
+                    {isConfirmingDelete ? (
+                        <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-1 duration-200">
+                            <span className="text-[9px] font-bold text-red-400 uppercase tracking-tighter">Sure?</span>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                                className="p-1 bg-red-500/20 hover:bg-red-500 text-white rounded transition-all"
+                                title="Yes, delete"
+                            >
+                                <TrashIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(false); }}
+                                className="p-1 hover:bg-white/10 text-muted-foreground rounded"
+                                title="Cancel"
+                            >
+                                <XMarkIcon className="w-4 h-4" />
+                            </button>
+                        </div>
+                    ) : (
+                        <button onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(true); }} className="p-1 hover:bg-red-500/20 text-red-400 rounded">
+                            <TrashIcon className="w-4 h-4" />
+                        </button>
+                    )}
                 </div>
             </div>
             <div className="p-4 border-t border-yellow-500/20 grid grid-cols-2 gap-4">
@@ -369,8 +418,12 @@ function ConditionBlockEditor({
     isLast: boolean;
     allBlocks: WorkflowBlock[];
 }) {
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const deleteRef = useRef<HTMLDivElement>(null);
+    useClickOutside(deleteRef, () => setIsConfirmingDelete(false));
+
     return (
-        <div className="rounded-xl border border-purple-500/30 bg-purple-500/5 overflow-hidden">
+        <div className="rounded-xl border border-purple-500/30 bg-purple-500/5 overflow-hidden" ref={deleteRef}>
             <div className="flex items-center justify-between p-3">
                 <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400 font-bold text-sm">
@@ -394,9 +447,29 @@ function ConditionBlockEditor({
                             <ChevronDownIcon className="w-4 h-4" />
                         </button>
                     )}
-                    <button onClick={onDelete} className="p-1 hover:bg-red-500/20 text-red-400 rounded">
-                        <TrashIcon className="w-4 h-4" />
-                    </button>
+                    {isConfirmingDelete ? (
+                        <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-1 duration-200">
+                            <span className="text-[9px] font-bold text-red-400 uppercase tracking-tighter">Sure?</span>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                                className="p-1 bg-red-500/20 hover:bg-red-500 text-white rounded transition-all"
+                                title="Yes, delete"
+                            >
+                                <TrashIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(false); }}
+                                className="p-1 hover:bg-white/10 text-muted-foreground rounded"
+                                title="Cancel"
+                            >
+                                <XMarkIcon className="w-4 h-4" />
+                            </button>
+                        </div>
+                    ) : (
+                        <button onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(true); }} className="p-1 hover:bg-red-500/20 text-red-400 rounded">
+                            <TrashIcon className="w-4 h-4" />
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -486,9 +559,11 @@ function ConditionBlockEditor({
 
 function AddBlockButton({ onAdd }: { onAdd: (type: WorkflowBlock['type']) => void }) {
     const [open, setOpen] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+    useClickOutside(containerRef, () => setOpen(false));
 
     return (
-        <div className="relative">
+        <div className="relative" ref={containerRef}>
             <button
                 onClick={() => setOpen(!open)}
                 className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-white/10 hover:border-primary/40 rounded-xl text-muted-foreground hover:text-primary transition-all group"
