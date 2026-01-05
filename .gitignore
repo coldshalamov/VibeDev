@@ -21,3 +21,4 @@ vibedev-vscode/node_modules/
 vibedev-vscode/dist/
 vibedev-vscode/*.vsix
 .vibedev/llm_export/pruned_repo.zip
+nul
