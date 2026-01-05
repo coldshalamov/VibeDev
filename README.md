@@ -1,46 +1,126 @@
-# VibeDev
+# VibeDev MCP
 
-VibeDev MCP is a **prompt compiler + verifier**: it turns planning artifacts into deterministic **StepTemplates** with **Gates**, then executes them with **EvidenceSchema**-based gating (and optional autoprompt runner actions).
+**The first conversational workflow orchestrator for AI agents.**
 
-Why it exists:
-- LLMs reliably fail via premature implementation, scope creep, and hand-wavy “done”.
-- VibeDev makes those failures expensive by requiring explicit steps, explicit gates, and verifiable evidence.
+VibeDev is a Model Context Protocol (MCP) server that doesn't just provide context or call APIs—it actively shapes how an AI agent works across multiple conversation threads to complete complex, multi-step projects.
 
-## Docs (start here)
+## Why VibeDev is Different
 
-- `docs/00_overview.md` — what/why + behavioral contract
-- `docs/02_step_canvas_spec.md` — StepTemplate schema + examples
-- `docs/03_gates_and_evidence.md` — gate catalog + evidence schema
-- `docs/05_studio_ui_spec.md` — the GUI (“Studio”) spec
-- `docs/07_doc_map.md` — where every concept lives
-- `docs/agent_setup.md` — install + agent/client MCP setup templates
+Most MCP servers fall into two categories:
 
-For LLM usage rules in this repo, read `CLAUDE.md`.
+- **Outward MCPs**: Call external APIs (weather, databases, search engines)
+- **Inward MCPs**: Pull in context (filesystem, documentation, memory)
 
-## Install (local)
+**VibeDev is bidirectional.** It engages with the model *throughout* a conversation and *persistently across threads* to guide behavior toward a specific goal. Think of it as a workflow state machine that the AI collaborates with in real-time.
+
+## What Makes This Possible
+
+VibeDev introduces a new paradigm: **collaborative prompt construction**. You and the AI build a workflow together using a visual canvas, then execute it step-by-step across multiple threads while maintaining perfect continuity.
+
+### The Workflow Canvas
+
+Build your workflow visually with three primitives:
+
+1. **Prompts** — Structured prompt boxes with fields for:
+   - Role (who the AI should be)
+   - Context (what it needs to know)
+   - Task (what to do)
+   - Guardrails (constraints)
+   - Deliverables (expected outputs)
+   - Log Instructions (what to record when done)
+
+2. **Conditions** — Decision points that check if work meets standards:
+   - **Soft conditions**: LLM judges the quality ("Does this meet the spec?")
+   - **Hard conditions**: Scripts verify objective criteria (tests pass, build succeeds)
+   - Both can loop back to fix-it prompts if they fail
+
+3. **Breakpoints** — Thread reset points that:
+   - Compile a memory block of findings
+   - Start a fresh conversation thread
+   - Inject the memory block into the next step
+   - Keep context focused and prevent drift
+
+### The Execution Model
+
+Once your workflow is designed:
+
+1. Call `/vd-next` skill to execute the next step
+2. The MCP injects the step's prompt into your conversation
+3. AI completes the work and logs a summary
+4. Conditions evaluate automatically (soft or hard checks)
+5. On pass: advance to next step
+6. On fail: loop to fix-it prompts
+7. On breakpoint: memory block saved, new thread required
+8. Repeat until complete
+
+Each completed step shows in the UI as a locked green box. Your entire project's progress is visible at a glance.
+
+## Why This Matters
+
+Traditional AI development conversations drift. Context gets lost. The same mistakes repeat. Work happens in bursts without continuity.
+
+VibeDev makes AI development **deterministic**:
+
+- ✅ Pre-plan entire workflows (research → planning → implementation → review)
+- ✅ Enforce quality gates at every step
+- ✅ Maintain findings and mistake ledgers across threads
+- ✅ Never lose track of what's been done
+- ✅ Resume multi-day projects without context loss
+- ✅ Collaborate with the AI to build the workflow itself using natural language
+
+## Quick Start
+
+### Installation
 
 Prereqs: Python 3.11+
 
-- `python -m pip install -e .`
-- (dev) `python -m pip install -e .[dev]`
+```bash
+python -m pip install -e .
+```
 
-## Quick start
+### Run the MCP Server
 
-### 1) Run as an MCP server (stdio)
+For AI agents (stdio):
+```bash
+vibedev-mcp
+```
 
-- `vibedev-mcp`
+For the GUI (HTTP + REST):
+```bash
+vibedev-mcp serve
+```
 
-### 2) Run the HTTP API (REST + SSE, for the GUI)
+### Run the Visual Workflow Studio
 
-- `vibedev-mcp serve` (defaults to `127.0.0.1:8765`)
+Terminal 1:
+```bash
+vibedev-mcp serve
+```
 
-Health check:
-- `curl http://127.0.0.1:8765/api/health`
+Terminal 2:
+```bash
+cd vibedev-ui
+npm install
+npm run dev
+```
 
-### 3) Run the GUI (local)
+Open `http://localhost:3000` to see the workflow canvas.
 
-- Terminal 1: `vibedev-mcp serve`
-- Terminal 2: `cd vibedev-ui` then `npm install` then `npm run dev` (Vite runs on `http://localhost:3000` and proxies `/api` to `http://localhost:8765`)
+### Configure Your AI Agent
+
+Add to your MCP config (e.g., Claude Desktop, Cline, etc.):
+
+```json
+{
+  "mcpServers": {
+    "vibedev": {
+      "command": "vibedev-mcp"
+    }
+  }
+}
+```
+
+Then create a skill that calls the MCP's `job_next_step_prompt` tool to advance through steps.
 
 ## Configuration
 
@@ -48,50 +128,94 @@ Health check:
 - Override DB path: `set VIBEDEV_DB_PATH=C:\path\to\vibedev.sqlite3`
 - Override HTTP port: `set VIBEDEV_HTTP_PORT=8765`
 
-## Tool surface (high level)
+## Architecture
 
-- Planning: `conductor_init`, `conductor_next_questions`, `conductor_answer`, `plan_*`, `job_set_ready`
-- Execution: `job_start`, `job_next_step_prompt`, `job_submit_step_result`
-- UI: `get_ui_state` (and `/api/jobs/{job_id}/ui-state` via HTTP)
-- Memory: `context_*`, `mistake_*`, `devlog_*`
-- Repo helpers: `repo_snapshot`, `repo_map_export`, `repo_find_stale_candidates`, `repo_hygiene_suggest`, `git_*`
+VibeDev maintains three types of state across conversation threads:
 
-## Runner (optional)
+### 1. Workflow State
+- Current step position
+- Completion status for each step
+- Condition evaluation results
+- Loop counters and retry logic
 
-For a minimal “hands” loop outside the UI (read/write evidence JSON and drive a
-job forward), use the runner CLI:
+### 2. Memory Blocks
+- Research findings
+- Key decisions made
+- Mistake ledger (what went wrong, why, how to avoid)
+- Development log (summary of each step)
 
-- `vibedev runner --job <JOB_ID> --evidence path\\to\\evidence.json`
+### 3. Context Injection
+- Repo snapshots
+- File descriptions
+- Invariants (rules that never change)
+- Custom context blocks
 
-## Workflow templates (best-practice defaults)
+All of this persists in SQLite and gets injected into the right conversations at the right time.
 
-VibeDev includes built-in workflow templates you can apply during planning to get a
-strong default step chain (small diffs, evidence, gates).
+## Use Cases
 
-- HTTP: `GET /api/templates`
-- HTTP apply: `POST /api/jobs/{job_id}/templates/{template_id}/apply`
-- MCP tools: `template_list`, `template_apply`
+### Multi-day Development Projects
+Plan a feature with 20+ steps spanning research, design, implementation, testing, and documentation. Work on it across multiple sessions without losing your place.
 
-### Safety note: shell-executing command gates
+### Quality-gated Development
+Set hard conditions (tests must pass, lint must succeed) and soft conditions (code review by AI, architecture sanity checks) at key points. No step advances until conditions pass.
 
-Some templates include command-executing gates (e.g. run tests/build). For safety, these
-are enforced as **opt-in** and **allowlisted** per job:
+### Research-to-Implementation Pipelines
+Build workflows that start with research prompts, compile findings into memory blocks, then inject those findings into implementation prompts. The AI remembers what it learned.
 
-- `policies.enable_shell_gates` (default: `false`)
-- `policies.shell_gate_allowlist` (default: `[]`)
+### Team Collaboration
+Multiple developers can see the workflow canvas and understand exactly where the AI is in the process. The development log shows what's been completed.
+
+## MCP Tools
+
+VibeDev exposes tools for:
+
+- **Workflow construction**: Create prompts, conditions, breakpoints
+- **Execution control**: Advance steps, evaluate conditions, handle failures
+- **Memory management**: Store findings, record mistakes, update context
+- **Repo integration**: Snapshots, file maps, git status, hygiene checks
+
+See `docs/` for complete tool reference.
+
+## Docs
+
+- `docs/00_overview.md` — Core concepts and behavioral contract
+- `docs/02_step_canvas_spec.md` — Prompt, condition, and breakpoint schemas
+- `docs/05_studio_ui_spec.md` — Visual workflow canvas spec
+- `docs/07_doc_map.md` — Complete concept index
+- `CLAUDE.md` — Developer instructions for working on VibeDev itself
+
+## The Bigger Picture
+
+VibeDev proves that MCP can be more than a data pipe. It can be a **conversational framework** that actively shapes agent behavior over time.
+
+This opens up entirely new possibilities:
+- Workflow orchestrators that guide multi-agent systems
+- Training frameworks that enforce learning patterns
+- Quality systems that won't let agents cut corners
+- Memory systems that grow more intelligent with each project
+
+We're just getting started.
 
 ## Contributing
 
-- Run tests: `python -m pytest -v`
-- Update generated API types (if you change HTTP models/endpoints): `cd vibedev-ui` then `npm run gen:api`
-- Keep diffs small and evidence-driven (see `CLAUDE.md`).
+Run tests:
+```bash
+python -m pytest -v
+```
+
+Update generated TypeScript API types:
+```bash
+cd vibedev-ui
+npm run gen:api
+```
+
+Keep diffs small and focused. See `CLAUDE.md` for development workflow guidelines.
+
+## License
+
+MIT
 
 ---
 
-## Compilation Surface
-
-| Section | Maps To | Field/Policy |
-|---------|---------|--------------|
-| Docs links | Informational | (Navigation only) |
-| Install/quick start | Informational | (How to run locally) |
-| Tool surface | Informational | (Public tool/API entrypoints) |
+**VibeDev**: Because AI development shouldn't feel like herding cats.

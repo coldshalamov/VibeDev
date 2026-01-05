@@ -228,6 +228,7 @@ class VibeDevStore:
                 ("definition_of_done_json", "TEXT"),
                 ("step_order_json", "TEXT"),
                 ("current_step_index", "INTEGER DEFAULT 0"),
+                ("pending_new_thread", "INTEGER DEFAULT 0"),
                 ("planning_answers_json", "TEXT"),
                 ("failure_reason", "TEXT"),
             ]
@@ -237,6 +238,13 @@ class VibeDevStore:
                 ("expected_outputs_json", "TEXT"),
                 ("gates_json", "TEXT"),
                 ("human_approved", "INTEGER DEFAULT 0"),
+                ("step_kind", "TEXT"),
+                ("phase", "TEXT"),
+                ("next_step_id", "TEXT"),
+                ("on_pass_step_id", "TEXT"),
+                ("on_fail_step_id", "TEXT"),
+                ("workflow_json", "TEXT"),
+                ("log_instruction", "TEXT"),
             ]
         )
         await self._ensure_snapshot_columns(
@@ -844,6 +852,307 @@ class VibeDevStore:
         await self._conn.commit()
         return normalized
 
+    # =========================================================================
+    # Unified Workflow (HorizontalStepFlow) compilation
+    # =========================================================================
+
+    async def workflow_compile_unified(self, *, job_id: str) -> dict[str, Any]:
+        """
+        Compile the Studio's UnifiedWorkflow (PROMPT / CONDITION / BREAKPOINT) into
+        runnable steps in the Store.
+
+        Source of truth: job_ui_state.graph_state_json under key 'unified_workflows'.
+        """
+        job = await self.get_job(job_id)
+        if job["status"] in {"EXECUTING", "PAUSED"}:
+            raise ValueError(f"Job {job_id} cannot compile workflow while status={job['status']}")
+
+        flow_state = await self.get_flow_state(job_id)
+        unified = (flow_state or {}).get("unified_workflows")
+        if not isinstance(unified, dict) or not unified:
+            raise ValueError("No unified_workflows found in job UI state. Open the Studio and create a workflow first.")
+
+        phase_order = ["research", "planning", "execution", "review"]
+
+        def _as_int(v: Any, default: int = 0) -> int:
+            try:
+                return int(v)
+            except Exception:
+                return default
+
+        def _get_steps(phase: str) -> list[dict[str, Any]]:
+            flow = unified.get(phase) or {}
+            steps = flow.get("steps") or []
+            if not isinstance(steps, list):
+                return []
+            return [s for s in steps if isinstance(s, dict) and isinstance(s.get("id"), str)]
+
+        def _first_step_id(phase: str) -> str | None:
+            steps = _get_steps(phase)
+            if not steps:
+                return None
+            # Prefer main stream (level 0) earliest column.
+            main = [s for s in steps if _as_int(s.get("subThreadLevel"), 0) == 0]
+            pick = main if main else steps
+            pick_sorted = sorted(pick, key=lambda s: (_as_int(s.get("colIndex"), 0), str(s.get("id"))))
+            return str(pick_sorted[0].get("id")) if pick_sorted else None
+
+        first_by_phase: dict[str, str] = {}
+        for p in phase_order:
+            sid = _first_step_id(p)
+            if sid:
+                first_by_phase[p] = sid
+
+        def _default_next_in_phase(step: dict[str, Any], phase_steps: list[dict[str, Any]]) -> str | None:
+            level = _as_int(step.get("subThreadLevel"), 0)
+            same_level = [s for s in phase_steps if _as_int(s.get("subThreadLevel"), 0) == level]
+            same_sorted = sorted(same_level, key=lambda s: (_as_int(s.get("colIndex"), 0), str(s.get("id"))))
+            idx = next((i for i, s in enumerate(same_sorted) if str(s.get("id")) == str(step.get("id"))), -1)
+            if idx != -1 and idx < len(same_sorted) - 1:
+                return str(same_sorted[idx + 1].get("id"))
+            return None
+
+        def _xml_tag(tag: str, value: str) -> str:
+            if not value.strip():
+                return ""
+            escaped = (
+                value.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+            return f"<{tag}>\\n{escaped}\\n</{tag}>"
+
+        def _build_prompt_instruction(phase: str, flow: dict[str, Any], step: dict[str, Any]) -> str:
+            global_ctx = str(flow.get("globalContext") or "").strip()
+            role = str(step.get("role") or "").strip()
+            context = str(step.get("context") or "").strip()
+            task = str(step.get("task") or "").strip()
+            guardrails = str(step.get("guardrails") or "").strip()
+            deliverables = str(step.get("deliverables") or "").strip()
+            log_instruction = str(step.get("logInstruction") or "").strip()
+
+            parts = [
+                "<vd_prompt>",
+                _xml_tag("phase", phase),
+                _xml_tag("global_context", global_ctx),
+                _xml_tag("role", role),
+                _xml_tag("context", context),
+                _xml_tag("task", task),
+                _xml_tag("guardrails", guardrails),
+                _xml_tag("deliverables", deliverables),
+                _xml_tag("log_instruction", log_instruction),
+                "</vd_prompt>",
+            ]
+            return "\n".join([p for p in parts if p])
+
+        compiled: list[dict[str, Any]] = []
+        allowlist_additions: list[str] = []
+        enable_shell_gates = False
+
+        for phase in phase_order:
+            flow = unified.get(phase) or {}
+            if not isinstance(flow, dict):
+                continue
+            phase_steps = _get_steps(phase)
+            # Deterministic ordering for persistence/UI (execution uses explicit next pointers).
+            phase_steps_sorted = sorted(
+                phase_steps,
+                key=lambda s: (
+                    _as_int(s.get("subThreadLevel"), 0),
+                    _as_int(s.get("colIndex"), 0),
+                    str(s.get("id")),
+                ),
+            )
+
+            for s in phase_steps_sorted:
+                step_id = str(s.get("id"))
+                step_type = str(s.get("type") or "PROMPT")
+                title = str(s.get("title") or s.get("label") or "Step")
+
+                next_step_id: str | None = None
+                on_pass_step_id: str | None = None
+                on_fail_step_id: str | None = None
+
+                if step_type == "CONDITION":
+                    on_pass_step_id = str(s.get("onPass") or "") or None
+                    on_fail_raw = str(s.get("onFail") or "") or None
+                    on_fail_step_id = None if on_fail_raw in {None, "", "_new_sub"} else on_fail_raw
+                    if not on_pass_step_id:
+                        on_pass_step_id = _default_next_in_phase(s, phase_steps)
+                else:
+                    raw_next = s.get("nextStep")
+                    if raw_next == "PHASE_TRANSITION":
+                        next_phase = str(s.get("nextPhase") or "").strip()
+                        next_step_id = first_by_phase.get(next_phase)
+                    else:
+                        next_step_id = str(raw_next or "") or None
+                        if not next_step_id:
+                            next_step_id = _default_next_in_phase(s, phase_steps)
+
+                instruction_prompt = ""
+                required_evidence: list[str] = ["step_summary"]
+                gates: list[dict[str, Any]] = []
+
+                if step_type == "PROMPT":
+                    instruction_prompt = _build_prompt_instruction(phase, flow, s)
+                elif step_type == "BREAKPOINT":
+                    reason = str(s.get("reason") or "").strip()
+                    memory_prompt = str(s.get("carryForward") or "").strip()
+                    carry_to = next_step_id or ""
+                    instruction_prompt = "\n".join(
+                        [
+                            "<vd_breakpoint>",
+                            _xml_tag("phase", phase),
+                            _xml_tag("reason", reason),
+                            _xml_tag("memory_prompt", memory_prompt),
+                            _xml_tag("carry_to_step_id", str(carry_to)),
+                            "</vd_breakpoint>",
+                            "",
+                            "Instruction: Create a concise Memory Pack for the next step/thread and save it via the VibeDev context tools.",
+                            "Do NOT print the full Memory Pack in chat. Confirm it was saved and include the context_id in evidence.",
+                            f"Recommended tags: carry_forward{'' if not carry_to else f', carry_to_step:{carry_to}'}",
+                        ]
+                    )
+                    required_evidence = ["step_summary", "memory_context_id"]
+                elif step_type == "CONDITION":
+                    cond_type = str(s.get("conditionType") or "script")
+                    cond_code = str(s.get("conditionCode") or "").strip()
+                    if cond_type == "llm":
+                        instruction_prompt = "\n".join(
+                            [
+                                "<vd_condition kind=\"soft\">",
+                                _xml_tag("phase", phase),
+                                _xml_tag("question", cond_code),
+                                "</vd_condition>",
+                                "",
+                                "Answer the question with TRUE/FALSE and submit evidence.condition_passed accordingly.",
+                            ]
+                        )
+                        required_evidence = ["step_summary", "condition_passed"]
+                        gates = [
+                            {
+                                "type": "evidence_bool_true",
+                                "parameters": {"key": "condition_passed"},
+                                "description": "Soft condition must evaluate true to take the pass branch.",
+                            }
+                        ]
+                    else:
+                        # Hard condition runs a command (policy allowlist applies).
+                        instruction_prompt = "\n".join(
+                            [
+                                "<vd_condition kind=\"hard\">",
+                                _xml_tag("phase", phase),
+                                _xml_tag("command", cond_code),
+                                "</vd_condition>",
+                                "",
+                                "The system will run the command above and require exit code 0 to take the pass branch.",
+                            ]
+                        )
+                        if cond_code:
+                            enable_shell_gates = True
+                            allowlist_additions.append(cond_code)
+                            gates = [
+                                {
+                                    "type": "command_exit_0",
+                                    "parameters": {"command": cond_code},
+                                    "description": "Hard condition command must exit 0.",
+                                }
+                            ]
+                    # Conditions are branch points; next pointers live on step columns.
+                else:
+                    # Unknown: treat as prompt.
+                    instruction_prompt = _build_prompt_instruction(phase, flow, s)
+
+                compiled.append(
+                    {
+                        "step_id": step_id,
+                        "title": title,
+                        "instruction_prompt": instruction_prompt,
+                        "acceptance_criteria": [],
+                        "required_evidence": required_evidence,
+                        "expected_outputs": [],
+                        "remediation_prompt": "",
+                        "context_refs": [],
+                        "gates": gates,
+                        "step_kind": step_type,
+                        "phase": phase,
+                        "next_step_id": next_step_id,
+                        "on_pass_step_id": on_pass_step_id,
+                        "on_fail_step_id": on_fail_step_id,
+                        "workflow_json": json.dumps(s),
+                        "log_instruction": str(s.get("logInstruction") or "").strip() or None,
+                    }
+                )
+
+        if not compiled:
+            raise ValueError("Unified workflow contains no steps to compile.")
+
+        # Update policies if hard conditions exist.
+        if enable_shell_gates:
+            policies = job.get("policies") or {}
+            allowlist = policies.get("shell_gate_allowlist") or []
+            if not isinstance(allowlist, list):
+                allowlist = []
+            allowlist = [x for x in allowlist if isinstance(x, str)]
+            for cmd in allowlist_additions:
+                if cmd not in allowlist:
+                    allowlist.append(cmd)
+
+            await self.job_update_policies(
+                job_id=job_id,
+                update={
+                    "enable_shell_gates": True,
+                    "shell_gate_allowlist": allowlist,
+                },
+                merge=True,
+            )
+
+        # Replace step list atomically.
+        await self._conn.execute("DELETE FROM steps WHERE job_id = ?;", (job_id,))
+
+        step_ids: list[str] = []
+        for idx, step in enumerate(compiled):
+            step_ids.append(step["step_id"])
+            await self._conn.execute(
+                """
+                INSERT INTO steps (
+                  job_id, step_id, order_index, title, instruction_prompt,
+                  acceptance_criteria_json, required_evidence_json,
+                  expected_outputs_json, remediation_prompt, context_refs_json,
+                  gates_json, step_kind, phase, next_step_id, on_pass_step_id,
+                  on_fail_step_id, workflow_json, log_instruction
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    job_id,
+                    step["step_id"],
+                    idx,
+                    step["title"],
+                    step["instruction_prompt"],
+                    json.dumps(step["acceptance_criteria"]),
+                    json.dumps(step["required_evidence"]),
+                    json.dumps(step["expected_outputs"]),
+                    step["remediation_prompt"],
+                    json.dumps(step["context_refs"]),
+                    json.dumps(step["gates"]),
+                    step.get("step_kind"),
+                    step.get("phase"),
+                    step.get("next_step_id"),
+                    step.get("on_pass_step_id"),
+                    step.get("on_fail_step_id"),
+                    step.get("workflow_json"),
+                    step.get("log_instruction"),
+                ),
+            )
+
+        await self._conn.execute(
+            "UPDATE jobs SET step_order_json = ?, current_step_index = 0, pending_new_thread = 0, updated_at = ? WHERE job_id = ?;",
+            (json.dumps(step_ids), _utc_now_iso(), job_id),
+        )
+        await self._conn.commit()
+
+        return {"ok": True, "job_id": job_id, "step_count": len(step_ids), "step_order": step_ids}
+
     async def _count_steps(self, job_id: str) -> int:
         async with self._conn.execute("SELECT COUNT(1) AS n FROM steps WHERE job_id = ?;", (job_id,)) as cursor:
             row = await cursor.fetchone()
@@ -923,6 +1232,13 @@ class VibeDevStore:
                     failures.append("Gate tests_passed failed: evidence.tests_passed is not true.")
                 if "tests_run" not in evidence:
                     failures.append("Gate tests_passed failed: missing evidence.tests_run.")
+
+            elif gate_type == "evidence_bool_true":
+                key = params.get("key")
+                if not isinstance(key, str) or not key.strip():
+                    failures.append("Gate evidence_bool_true misconfigured: parameters.key must be a non-empty string.")
+                elif evidence.get(key) is not True:
+                    failures.append(f"Gate evidence_bool_true failed: evidence.{key} is not true.")
 
             elif gate_type == "lint_passed":
                 if evidence.get("lint_passed") is not True:
@@ -1519,6 +1835,36 @@ class VibeDevStore:
             for r in rows:
                 relevant_mistakes.append(f"{r['title']}: {r['avoid_next_time']}")
 
+        carry_forward_text: str | None = None
+        try:
+            async with self._conn.execute(
+                """
+                SELECT context_id, block_type, content, tags_json, created_at
+                FROM context_blocks
+                WHERE job_id = ?
+                ORDER BY created_at DESC
+                LIMIT 50;
+                """,
+                (job_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+            for row in rows:
+                tags = json.loads(row["tags_json"] or "[]")
+                if not isinstance(tags, list):
+                    tags = []
+                tags = [t for t in tags if isinstance(t, str)]
+
+                # Most-specific: carry to this step.
+                if f"carry_to_step:{step_id}" in tags:
+                    carry_forward_text = row["content"]
+                    break
+                # General carry-forward memory.
+                if "carry_forward" in tags or row["block_type"] in {"MEMORY_PACK", "BREAKPOINT_MEMORY"}:
+                    carry_forward_text = row["content"]
+                    break
+        except Exception:
+            carry_forward_text = None
+
         evidence_template: dict[str, Any] = {}
         required_keys = set(required_evidence["required"])
         if policies.get("require_diff_summary"):
@@ -1579,10 +1925,13 @@ class VibeDevStore:
                 "Fill this JSON-like object and submit it via job_submit_step_result.evidence:",
                 json.dumps(evidence_template, indent=2),
                 "",
-                "6) Reminder of Relevant Mistakes",
+                "6) Carry-Forward Memory",
+                *(["(none)"] if not carry_forward_text else [carry_forward_text]),
+                "",
+                "7) Reminder of Relevant Mistakes",
                 *([f"- {m}" for m in relevant_mistakes] if relevant_mistakes else ["- (none)"]),
                 "",
-                "7) If Stuck",
+                "8) If Stuck",
                 remediation,
                 "",
                 "Executor directive: perform ONLY this step, then submit evidence. If any criterion is false, do NOT claim MET.",
@@ -1747,17 +2096,31 @@ class VibeDevStore:
                 evidence=evidence,
             )
 
+        step_kind = str(step.get("step_kind") or "PROMPT").upper()
+        is_condition = step_kind == "CONDITION"
+        is_breakpoint = step_kind == "BREAKPOINT"
+
         accepted = False
         next_action = "RETRY"
+        condition_passed: bool | None = None
+
         if missing_fields:
             rejection_reasons.append("Missing required evidence keys.")
             rejection_reasons.extend(schema_errors)
         elif criteria_checklist_required and not criteria_checklist_all_true:
             rejection_reasons.append("One or more acceptance criteria were marked false.")
-        elif gate_failures:
-            rejection_reasons.extend(gate_failures)
         elif model_claim != "MET":
             rejection_reasons.append("Model claim is not MET.")
+        elif is_condition:
+            # Conditions are branch points: always accept (if schema is valid) and route pass/fail.
+            accepted = True
+            # Determine pass/fail without blocking acceptance.
+            if step.get("gates"):
+                condition_passed = len(gate_failures) == 0
+            else:
+                condition_passed = evidence.get("condition_passed") is True
+        elif gate_failures:
+            rejection_reasons.extend(gate_failures)
         else:
             accepted = True
 
@@ -1773,20 +2136,64 @@ class VibeDevStore:
                     await self.job_fail(job_id, f"Retry limit reached for {step_id}")
 
         if accepted:
-            idx = int(job.get("current_step_index") or 0) + 1
-            if idx >= len(job["step_order"]):
+            step_order: list[str] = job.get("step_order") or []
+            id_to_idx = {sid: i for i, sid in enumerate(step_order)}
+            curr_idx = int(job.get("current_step_index") or 0)
+
+            # Compute next index
+            next_step_id: str | None = None
+            if is_condition:
+                # Route based on condition result.
+                next_step_id = (
+                    step.get("on_pass_step_id") if condition_passed else step.get("on_fail_step_id")
+                )
+                if next_step_id:
+                    next_step_id = str(next_step_id)
+            else:
+                next_step_id = step.get("next_step_id")
+                if next_step_id:
+                    next_step_id = str(next_step_id)
+
+            next_idx: int | None = None
+            if next_step_id and next_step_id in id_to_idx:
+                next_idx = id_to_idx[next_step_id]
+            elif not is_condition:
+                next_idx = curr_idx + 1
+
+            now = _utc_now_iso()
+            if next_idx is None:
+                # No valid next step - pause for human.
+                next_action = "PAUSE_FOR_HUMAN"
+                await self.job_pause(job_id)
+            elif next_idx >= len(step_order):
                 next_action = "JOB_COMPLETE"
                 await self._conn.execute(
-                    "UPDATE jobs SET current_step_index = ?, status = 'COMPLETE', updated_at = ? WHERE job_id = ?;",
-                    (idx, _utc_now_iso(), job_id),
+                    "UPDATE jobs SET current_step_index = ?, pending_new_thread = 0, status = 'COMPLETE', updated_at = ? WHERE job_id = ?;",
+                    (next_idx, now, job_id),
                 )
             else:
                 next_action = "NEXT_STEP_AVAILABLE"
+                pending_new_thread = 1 if is_breakpoint else 0
                 await self._conn.execute(
-                    "UPDATE jobs SET current_step_index = ?, updated_at = ? WHERE job_id = ?;",
-                    (idx, _utc_now_iso(), job_id),
+                    "UPDATE jobs SET current_step_index = ?, pending_new_thread = ?, updated_at = ? WHERE job_id = ?;",
+                    (next_idx, pending_new_thread, now, job_id),
                 )
             await self._conn.commit()
+
+            # Record a compact per-step summary for the UI log pane (if provided).
+            step_summary = evidence.get("step_summary")
+            if isinstance(step_summary, str) and step_summary.strip():
+                try:
+                    await self.devlog_append(
+                        job_id=job_id,
+                        content=step_summary.strip(),
+                        step_id=step_id,
+                        commit_hash=commit_hash,
+                        log_type="STEP_SUMMARY",
+                    )
+                except Exception:
+                    # Logging should not block step progress.
+                    pass
 
         attempt_id = _new_id("ATT", length=6)
         await self._conn.execute(
@@ -1948,6 +2355,17 @@ class VibeDevStore:
             rows = await cursor.fetchall()
         attempt_counts = {r["step_id"]: int(r["n"]) for r in rows}
 
+        async with self._conn.execute(
+            """
+            SELECT DISTINCT step_id
+            FROM attempts
+            WHERE job_id = ? AND outcome = 'accepted';
+            """,
+            (job_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        accepted_steps = {r["step_id"] for r in rows}
+
         # Get current step details if executing
         current_step = None
         current_step_attempts: list[dict[str, Any]] = []
@@ -1974,16 +2392,22 @@ class VibeDevStore:
 
         # Compute step statuses
         step_statuses = []
-        current_idx = job.get("current_step_index", 0)
+        current_step_id = None
+        if job["status"] in {"EXECUTING", "PAUSED"} and job.get("step_order"):
+            idx = int(job.get("current_step_index") or 0)
+            step_order = job["step_order"]
+            if 0 <= idx < len(step_order):
+                current_step_id = step_order[idx]
+
         for i, step in enumerate(steps):
             if job["status"] == "COMPLETE":
                 status = "DONE"
             elif job["status"] not in {"EXECUTING", "PAUSED"}:
                 status = "PENDING"
-            elif i < current_idx:
-                status = "DONE"
-            elif i == current_idx:
+            elif step["step_id"] == current_step_id:
                 status = "ACTIVE"
+            elif step["step_id"] in accepted_steps:
+                status = "DONE"
             else:
                 status = "PENDING"
             step_statuses.append({

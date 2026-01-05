@@ -180,6 +180,15 @@ export async function setJobReady(
   return request(`/jobs/${jobId}/ready`, { method: 'POST' });
 }
 
+export async function compileUnifiedWorkflow(jobId: string): Promise<{
+  ok: boolean;
+  job_id: string;
+  step_count: number;
+  step_order: string[];
+}> {
+  return request(`/jobs/${jobId}/workflow/compile`, { method: 'POST' });
+}
+
 // =============================================================================
 // Planning Operations
 // =============================================================================

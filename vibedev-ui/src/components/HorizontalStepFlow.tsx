@@ -42,6 +42,7 @@ export type Step = {
     task?: string;
     guardrails?: string;
     deliverables?: string;
+    logInstruction?: string;
     examples?: string;
     showExamples?: boolean;
 
@@ -190,6 +191,52 @@ function getSmartDefaultNext(step: Step, allSteps: Step[]): string | undefined {
 // Components
 // =============================================================================
 
+function AutoGrowTextarea({
+    value,
+    onChange,
+    placeholder,
+    className,
+    disabled,
+    maxLines = 8,
+}: {
+    value: string;
+    onChange: (next: string) => void;
+    placeholder?: string;
+    className?: string;
+    disabled?: boolean;
+    maxLines?: number;
+}) {
+    const ref = useRef<HTMLTextAreaElement>(null);
+
+    useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        el.style.height = 'auto';
+
+        const computed = window.getComputedStyle(el);
+        const lhRaw = computed.lineHeight || '16px';
+        const lh = Number.parseFloat(lhRaw) || 16;
+        const maxHeight = Math.max(lh * maxLines, lh);
+        el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+    }, [value, maxLines]);
+
+    return (
+        <textarea
+            ref={ref}
+            rows={1}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholder}
+            disabled={disabled}
+            className={cn(
+                'resize-none overflow-hidden',
+                disabled && 'cursor-not-allowed opacity-70',
+                className
+            )}
+        />
+    );
+}
+
 function StepCard({
     step,
     allSteps,
@@ -198,6 +245,9 @@ function StepCard({
     isSelected,
     onSelect,
     onDragStart,
+    currentPhase: _currentPhase,
+    status,
+    lockCompletedSteps,
 }: {
     step: Step;
     allSteps: Step[];
@@ -206,6 +256,9 @@ function StepCard({
     isSelected: boolean;
     onSelect: () => void;
     onDragStart: (e: React.MouseEvent) => void;
+    currentPhase?: string;
+    status?: 'PENDING' | 'ACTIVE' | 'DONE' | string;
+    lockCompletedSteps?: boolean;
 }) {
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const deleteRef = useRef<HTMLDivElement>(null);
@@ -218,11 +271,15 @@ function StepCard({
         label: `${s.label}: ${s.title.slice(0, 20)}${s.title.length > 20 ? '...' : ''}`,
     }));
 
-    const borderColor = step.type === 'PROMPT'
-        ? 'border-primary/40'
-        : step.type === 'CONDITION'
-            ? 'border-purple-500/40'
-            : 'border-yellow-500/40';
+    const borderColor = status === 'DONE'
+        ? 'border-green-500/50'
+        : status === 'ACTIVE'
+            ? 'border-blue-500/50'
+            : step.type === 'PROMPT'
+                ? 'border-primary/40'
+                : step.type === 'CONDITION'
+                    ? 'border-purple-500/40'
+                    : 'border-yellow-500/40';
 
     const bgColor = step.type === 'PROMPT'
         ? 'bg-primary/5'
@@ -238,6 +295,11 @@ function StepCard({
             : 'text-yellow-400 bg-yellow-500/20';
 
     const isMainThread = step.subThreadLevel === 0;
+    const isLocked = Boolean(lockCompletedSteps && status === 'DONE');
+    const safeOnChange = (next: Step) => {
+        if (isLocked) return;
+        onChange(next);
+    };
 
     return (
         <div
@@ -247,7 +309,8 @@ function StepCard({
                 borderColor,
                 bgColor,
                 isSelected && "ring-2 ring-white/30 shadow-lg",
-                step.isSubThread && "opacity-95"
+                step.isSubThread && "opacity-95",
+                isLocked && "opacity-80"
             )}
             onClick={onSelect}
         >
@@ -270,9 +333,23 @@ function StepCard({
                         {typeIcon}
                     </div>
                     <span className="text-xs font-bold text-muted-foreground">{step.label}</span>
+                    {status === 'DONE' && (
+                        <span className="text-[9px] font-bold text-green-300 bg-green-500/15 border border-green-500/30 px-1.5 py-0.5 rounded">
+                            DONE
+                        </span>
+                    )}
+                    {status === 'ACTIVE' && (
+                        <span className="text-[9px] font-bold text-blue-300 bg-blue-500/15 border border-blue-500/30 px-1.5 py-0.5 rounded">
+                            ACTIVE
+                        </span>
+                    )}
                 </div>
 
-                {isConfirmingDelete ? (
+                {isLocked ? (
+                    <span className="text-[9px] font-bold text-green-300/80 bg-green-500/10 border border-green-500/20 px-2 py-1 rounded">
+                        LOCKED
+                    </span>
+                ) : isConfirmingDelete ? (
                     <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-1 duration-200">
                         <span className="text-[9px] font-bold text-red-400 uppercase tracking-tighter">Sure?</span>
                         <button
@@ -306,9 +383,10 @@ function StepCard({
                 <input
                     className="w-full bg-transparent text-sm font-medium focus:outline-none focus:ring-1 focus:ring-primary/40 rounded px-1"
                     value={step.title}
-                    onChange={(e) => onChange({ ...step, title: e.target.value })}
+                    onChange={(e) => safeOnChange({ ...step, title: e.target.value })}
                     placeholder={step.type === 'CONDITION' ? 'Condition name...' : 'Step title...'}
                     onClick={(e) => e.stopPropagation()}
+                    disabled={isLocked}
                 />
             </div>
 
@@ -330,42 +408,57 @@ function StepCard({
                         <>
                             <div>
                                 <label className="text-[9px] uppercase font-bold text-muted-foreground">Role</label>
-                                <textarea
-                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs resize-none h-10 mt-0.5"
+                                <AutoGrowTextarea
+                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5 placeholder-gray-600 placeholder-opacity-60"
                                     value={step.role || ''}
-                                    onChange={(e) => onChange({ ...step, role: e.target.value })}
+                                    onChange={(next) => safeOnChange({ ...step, role: next })}
+                                    disabled={isLocked}
+                                    maxLines={4}
+                                    placeholder="Who should the model be for this step?"
                                 />
                             </div>
                             <div>
                                 <label className="text-[9px] uppercase font-bold text-muted-foreground">Context</label>
-                                <textarea
-                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs resize-none h-16 mt-0.5"
+                                <AutoGrowTextarea
+                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5 placeholder-gray-600 placeholder-opacity-60"
                                     value={step.context || ''}
-                                    onChange={(e) => onChange({ ...step, context: e.target.value })}
+                                    onChange={(next) => safeOnChange({ ...step, context: next })}
+                                    disabled={isLocked}
+                                    maxLines={8}
+                                    placeholder="What does the model need to know?"
                                 />
                             </div>
                             <div>
                                 <label className="text-[9px] uppercase font-bold text-muted-foreground">Task</label>
-                                <textarea
-                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs resize-none h-16 mt-0.5"
+                                <AutoGrowTextarea
+                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5 placeholder-gray-600 placeholder-opacity-60"
                                     value={step.task || ''}
-                                    onChange={(e) => onChange({ ...step, task: e.target.value })}
+                                    onChange={(next) => safeOnChange({ ...step, task: next })}
+                                    disabled={isLocked}
+                                    maxLines={8}
+                                    placeholder="What should the model do?"
                                 />
                             </div>
                             <div>
                                 <label className="text-[9px] uppercase font-bold text-muted-foreground">Guardrails</label>
-                                <textarea
-                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs resize-none h-10 mt-0.5"
+                                <AutoGrowTextarea
+                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5 placeholder-gray-600 placeholder-opacity-60"
                                     value={step.guardrails || ''}
-                                    onChange={(e) => onChange({ ...step, guardrails: e.target.value })}
+                                    onChange={(next) => safeOnChange({ ...step, guardrails: next })}
+                                    disabled={isLocked}
+                                    maxLines={6}
+                                    placeholder="What constraints should it follow?"
                                 />
                             </div>
                             <div>
-                                <label className="text-[9px] uppercase font-bold text-muted-foreground">Outputs</label>
-                                <textarea
-                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs resize-none h-10 mt-0.5"
+                                <label className="text-[9px] uppercase font-bold text-muted-foreground">Deliverables</label>
+                                <AutoGrowTextarea
+                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5 placeholder-gray-600 placeholder-opacity-60"
                                     value={step.deliverables || ''}
-                                    onChange={(e) => onChange({ ...step, deliverables: e.target.value })}
+                                    onChange={(next) => safeOnChange({ ...step, deliverables: next })}
+                                    disabled={isLocked}
+                                    maxLines={6}
+                                    placeholder="What are the expected outputs?"
                                 />
                             </div>
                         </>
@@ -377,8 +470,9 @@ function StepCard({
                                 <label className="text-[9px] uppercase font-bold text-muted-foreground">Type</label>
                                 <select
                                     className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5"
-                                    value={step.conditionType || 'script'}
-                                    onChange={(e) => onChange({ ...step, conditionType: e.target.value as 'script' | 'llm' })}
+                                    value={step.conditionType || 'script'}      
+                                    onChange={(e) => safeOnChange({ ...step, conditionType: e.target.value as 'script' | 'llm' })}
+                                    disabled={isLocked}
                                 >
                                     <option value="script">Script (exit code)</option>
                                     <option value="llm">LLM Judge</option>
@@ -408,22 +502,38 @@ function StepCard({
                             <div>
                                 <label className="text-[9px] uppercase font-bold text-muted-foreground">Reason</label>
                                 <input
-                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5"
+                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5 placeholder-gray-600 placeholder-opacity-60"
                                     value={step.reason || ''}
-                                    onChange={(e) => onChange({ ...step, reason: e.target.value })}
-                                    placeholder="Why start fresh..."
+                                    onChange={(e) => safeOnChange({ ...step, reason: e.target.value })}
+                                    placeholder="Why start a new thread?"
+                                    disabled={isLocked}
                                 />
                             </div>
                             <div>
                                 <label className="text-[9px] uppercase font-bold text-muted-foreground">Findings to Gather (Memory Block)</label>
-                                <textarea
-                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs resize-none h-16 mt-0.5"
+                                <AutoGrowTextarea
+                                    className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5 placeholder-gray-600 placeholder-opacity-60"
                                     value={step.carryForward || ''}
-                                    onChange={(e) => onChange({ ...step, carryForward: e.target.value })}
+                                    onChange={(next) => safeOnChange({ ...step, carryForward: next })}
+                                    disabled={isLocked}
+                                    maxLines={8}
+                                    placeholder="What findings should be compiled into the memory block?"
                                 />
                             </div>
                         </>
                     )}
+
+                    <div>
+                        <label className="text-[9px] uppercase font-bold text-muted-foreground">Log Instruction</label>
+                        <AutoGrowTextarea
+                            className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5 placeholder-gray-600 placeholder-opacity-60"
+                            value={step.logInstruction || ''}
+                            onChange={(next) => safeOnChange({ ...step, logInstruction: next })}
+                            disabled={isLocked}
+                            maxLines={6}
+                            placeholder="What should the model log?"
+                        />
+                    </div>
 
                     {/* ALWAYS SHOW NEXT STEP SELECT */}
                     <div className="pt-2 border-t border-white/5">
@@ -436,7 +546,8 @@ function StepCard({
                                             <select
                                                 className="w-full bg-black/20 border border-green-500/30 rounded p-1 text-[10px] mt-0.5"
                                                 value={step.onPass || step.nextStep || ''}
-                                                onChange={(e) => onChange({ ...step, onPass: e.target.value })}
+                                                onChange={(e) => safeOnChange({ ...step, onPass: e.target.value })}
+                                                disabled={isLocked}
                                             >
                                                 {(() => {
                                                     const smartDefault = getSmartDefaultNext(step, allSteps);
@@ -453,8 +564,9 @@ function StepCard({
                                             <label className="text-[9px] uppercase font-bold text-red-400">On Fail →</label>
                                             <select
                                                 className="w-full bg-black/20 border border-red-500/30 rounded p-1 text-[10px] mt-0.5"
-                                                value={step.onFail || ''}
-                                                onChange={(e) => onChange({ ...step, onFail: e.target.value })}
+                                                value={step.onFail || ''}       
+                                                onChange={(e) => safeOnChange({ ...step, onFail: e.target.value })}
+                                                disabled={isLocked}
                                             >
                                                 <option value="">Stop</option>
                                                 {stepOptions.filter(o => allSteps.find(s => s.id === o.value)?.isSubThread).map(o => (
@@ -471,7 +583,8 @@ function StepCard({
                                     <select
                                         className="w-full bg-black/20 border border-green-500/20 rounded p-1 text-[10px] mt-0.5"
                                         value={step.nextStep || ''}
-                                        onChange={(e) => onChange({ ...step, nextStep: e.target.value })}
+                                        onChange={(e) => safeOnChange({ ...step, nextStep: e.target.value })}
+                                        disabled={isLocked}
                                     >
                                         {(() => {
                                             const smartDefault = getSmartDefaultNext(step, allSteps);
@@ -502,9 +615,15 @@ function StepCard({
                         </div>
                         <div className="p-4">
                             <textarea
-                                className="w-full h-64 bg-black/40 border border-white/10 rounded-lg p-3 font-mono text-sm resize-none focus:border-primary/50 outline-none"
+                                className="w-full h-64 bg-black/40 border border-white/10 rounded-lg p-3 font-mono text-sm resize-none focus:border-primary/50 outline-none placeholder-gray-600 placeholder-opacity-60"
                                 value={step.conditionCode || ''}
-                                onChange={(e) => onChange({ ...step, conditionCode: e.target.value })}
+                                onChange={(e) => safeOnChange({ ...step, conditionCode: e.target.value })}
+                                disabled={isLocked}
+                                placeholder={
+                                    step.conditionType === 'llm'
+                                        ? 'Ask a TRUE/FALSE question. Answer must be TRUE to pass.'
+                                        : 'Command to run. Exit code 0 = pass.'
+                                }
                             />
                         </div>
                         <div className="p-4 border-t border-white/10 flex justify-end">
@@ -586,9 +705,6 @@ function FlowConnections({ steps }: { steps: Step[] }) {
                     const next = steps.find(s => s.id === nextId);
                     if (next) {
                         const end = getCoords(next);
-                        const isLoopBack = next.subThreadLevel !== step.subThreadLevel || next.colIndex <= step.colIndex;
-                        const isExplicit = !!(step.onPass || step.nextStep);
-
                         const endX = end.x + TX;
                         const endY = end.y + TY;
 
@@ -651,13 +767,61 @@ function FlowConnections({ steps }: { steps: Step[] }) {
 // Main Canvas
 // =============================================================================
 
-export function HorizontalStepFlow({ flow, onChange }: { flow: Flow, onChange: (f: Flow) => void }) {
+export function HorizontalStepFlow({
+    flow,
+    onChange,
+    currentPhase,
+    stepStatusById,
+    lockCompletedSteps,
+}: {
+    flow: Flow;
+    onChange: (f: Flow) => void;
+    currentPhase?: string;
+    stepStatusById?: Record<string, string>;
+    lockCompletedSteps?: boolean;
+}) {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
     const dragOrigin = useRef<{ x: number, y: number } | null>(null);
     const chainIds = useRef<string[]>([]);
     const containerRef = useRef<HTMLDivElement>(null);
+
+    // Canvas panning state
+    const [isPanning, setIsPanning] = useState(false);
+
+    // Canvas panning handler - uses inline closures to avoid stale callback issues
+    const handlePanStart = useCallback((e: React.MouseEvent) => {
+        // Only pan if clicking on empty canvas (not on a node)
+        if ((e.target as HTMLElement).closest('[data-step-card]')) return;
+        if (!containerRef.current) return;
+        // Only left mouse button
+        if (e.button !== 0) return;
+
+        // Capture all values at click time in closure
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const container = containerRef.current;
+        const scrollLeft = container.scrollLeft;
+        const scrollTop = container.scrollTop;
+
+        setIsPanning(true);
+
+        function onMove(moveEvent: MouseEvent) {
+            container.scrollLeft = scrollLeft - (moveEvent.clientX - startX);
+            container.scrollTop = scrollTop - (moveEvent.clientY - startY);
+        }
+
+        function onUp() {
+            setIsPanning(false);
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+        }
+
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        e.preventDefault();
+    }, []);
 
     const steps = useMemo(() => normalizeLayout(flow.steps), [flow.steps]);
 
@@ -823,7 +987,11 @@ export function HorizontalStepFlow({ flow, onChange }: { flow: Flow, onChange: (
             {/* 2D Canvas */}
             <div
                 ref={containerRef}
-                className="flex-1 overflow-auto relative cursor-grab active:cursor-grabbing scroll-smooth"
+                className={cn(
+                    "flex-1 overflow-auto relative select-none",
+                    isPanning ? "cursor-grabbing" : "cursor-grab"
+                )}
+                onMouseDown={handlePanStart}
             >
                 <div
                     className="relative min-w-[4000px] bg-dots-pattern"
@@ -852,6 +1020,7 @@ export function HorizontalStepFlow({ flow, onChange }: { flow: Flow, onChange: (
                         return (
                             <div
                                 key={step.id}
+                                data-step-card
                                 className={cn(
                                     "absolute rounded-xl transition-[transform,shadow]",
                                     isInDraggedChain ? "z-50 shadow-[0_20px_50px_rgba(0,0,0,0.5)] cursor-grabbing scale-[1.02]" : "z-10 duration-200"
@@ -863,11 +1032,14 @@ export function HorizontalStepFlow({ flow, onChange }: { flow: Flow, onChange: (
                                 <StepCard
                                     step={step}
                                     allSteps={steps}
-                                    onChange={(s) => updateStep(step.id, s)}
+                                    onChange={(s) => updateStep(step.id, s)}    
                                     onDelete={() => onChange({ ...flow, steps: flow.steps.filter(x => x.id !== step.id) })}
                                     isSelected={selectedId === step.id}
-                                    onSelect={() => setSelectedId(step.id)}
+                                    onSelect={() => setSelectedId(step.id)}     
                                     onDragStart={(e) => handleDragStart(e, step)}
+                                    currentPhase={currentPhase}
+                                    status={stepStatusById?.[step.id]}
+                                    lockCompletedSteps={lockCompletedSteps}
                                 />
                             </div>
                         );
@@ -881,7 +1053,7 @@ export function HorizontalStepFlow({ flow, onChange }: { flow: Flow, onChange: (
                         const vY = getVisualY(lvl) + 20;
 
                         return (
-                            <div key={lvl} className="absolute z-10" style={{ transform: `translate(${vX}px, ${vY}px)` }}>
+                            <div key={lvl} data-step-card className="absolute z-10" style={{ transform: `translate(${vX}px, ${vY}px)` }}>
                                 <div className="flex flex-col items-center gap-2">
                                     <span className="text-[10px] uppercase font-bold opacity-20 tracking-widest pointer-events-none select-none">
                                         {lvl === 0 ? 'Main Stream' : `Level ${lvl}`}

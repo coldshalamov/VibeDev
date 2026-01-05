@@ -454,6 +454,14 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         normalized = await store.plan_refine_steps(job_id, payload.edits)
         return {"ok": True, "steps": normalized}
 
+    @app.post("/api/jobs/{job_id}/workflow/compile")
+    async def compile_unified_workflow(job_id: str, request: Request) -> dict[str, Any]:
+        """
+        Compile the Studio's UnifiedWorkflow (HorizontalStepFlow) into runnable Store steps.
+        """
+        store = store_from(request)
+        return await store.workflow_compile_unified(job_id=job_id)
+
     @app.post("/api/jobs/{job_id}/templates/{template_id}/apply")
     async def apply_template(
         job_id: str,
@@ -682,6 +690,27 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         step_id = step_order[idx]
         step = await store._get_step(job_id, step_id)
 
+        # Explicit breakpoint-driven thread reset.
+        if int(job.get("pending_new_thread") or 0) == 1:
+            prompt_data = await store.job_next_step_prompt(job_id)
+            prompt = prompt_data.get("prompt", "")
+            marker = f"\n\n✓ VD_READY_{job_id}"
+
+            # Clear the flag so we don't loop forever.
+            await store._conn.execute(
+                "UPDATE jobs SET pending_new_thread = 0 WHERE job_id = ?;",
+                (job_id,),
+            )
+            await store._conn.commit()
+
+            return {
+                "action": "NEW_THREAD",
+                "prompt": prompt + marker,
+                "step_id": step_id,
+                "job_id": job_id,
+                "reason": "Breakpoint reached (new thread requested by workflow).",
+            }
+
         # Check if human review needed
         if step.get("human_review"):
             return {
@@ -693,8 +722,8 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
 
         # Check retry count to determine if we're in diagnose mode
         async with store._conn.execute(
-            "SELECT COUNT(*) FROM attempts WHERE step_id = ? AND accepted = 0",
-            (step_id,),
+            "SELECT COUNT(*) FROM attempts WHERE job_id = ? AND step_id = ? AND outcome = 'rejected'",
+            (job_id, step_id),
         ) as cursor:
             row = await cursor.fetchone()
             retry_count = row[0] if row else 0

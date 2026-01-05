@@ -1,5 +1,5 @@
 // =============================================================================
-// Info Sidebar - Research Findings, Mistakes, Dev Log
+// Info Sidebar - Research Findings, Mistakes, Dev Log, Global Context
 // =============================================================================
 
 import { useState, useRef } from 'react';
@@ -12,6 +12,7 @@ import {
     ClockIcon,
     PlusIcon,
     TrashIcon,
+    DocumentTextIcon,
 } from '@heroicons/react/24/outline';
 
 // =============================================================================
@@ -47,7 +48,17 @@ type LogEntry = {
 
 export function InfoSidebar() {
     const currentJobId = useVibeDevStore((state) => state.currentJobId);
-    const [activeTab, setActiveTab] = useState<'findings' | 'mistakes' | 'log'>('findings');
+    const uiState = useVibeDevStore((state) => state.uiState);
+    const viewMode = useVibeDevStore((state) => state.viewMode.mode);
+    const globalContextByPhase = useVibeDevStore((state) => state.globalContextByPhase);
+    const setGlobalContext = useVibeDevStore((state) => state.setGlobalContext);
+
+    // Get current phase's context
+    const currentPhase = viewMode === 'workflow' ? 'research' : viewMode;
+    const globalContext = globalContextByPhase[currentPhase] || '';
+    const handleContextChange = (value: string) => setGlobalContext(currentPhase, value);
+
+    const [activeTab, setActiveTab] = useState<'findings' | 'mistakes' | 'log' | 'context'>('findings');
 
     // For now, use localStorage. Later can connect to backend.
     const storageKey = `vibedev-info-${currentJobId}`;
@@ -55,7 +66,7 @@ export function InfoSidebar() {
     const [findings, setFindings] = useState<ResearchFinding[]>(() => {
         if (typeof window !== 'undefined' && currentJobId) {
             const saved = localStorage.getItem(`${storageKey}-findings`);
-            if (saved) try { return JSON.parse(saved); } catch { }
+            if (saved) try { return JSON.parse(saved); } catch { /* ignore */ }
         }
         return [];
     });
@@ -63,7 +74,7 @@ export function InfoSidebar() {
     const [mistakes, setMistakes] = useState<Mistake[]>(() => {
         if (typeof window !== 'undefined' && currentJobId) {
             const saved = localStorage.getItem(`${storageKey}-mistakes`);
-            if (saved) try { return JSON.parse(saved); } catch { }
+            if (saved) try { return JSON.parse(saved); } catch { /* ignore */ }
         }
         return [];
     });
@@ -110,11 +121,24 @@ export function InfoSidebar() {
             {/* Tabs */}
             <div className="flex border-b border-foreground/10">
                 <TabButton
+                    active={activeTab === 'log'}
+                    onClick={() => setActiveTab('log')}
+                    icon={<ClockIcon className="w-4 h-4" />}
+                    label="Log"
+                    count={logs.length}
+                />
+                <TabButton
                     active={activeTab === 'findings'}
                     onClick={() => setActiveTab('findings')}
                     icon={<BookOpenIcon className="w-4 h-4" />}
                     label="Findings"
                     count={findings.length}
+                />
+                <TabButton
+                    active={activeTab === 'context'}
+                    onClick={() => setActiveTab('context')}
+                    icon={<DocumentTextIcon className="w-4 h-4" />}
+                    label="Context"
                 />
                 <TabButton
                     active={activeTab === 'mistakes'}
@@ -123,17 +147,17 @@ export function InfoSidebar() {
                     label="Mistakes"
                     count={mistakes.length}
                 />
-                <TabButton
-                    active={activeTab === 'log'}
-                    onClick={() => setActiveTab('log')}
-                    icon={<ClockIcon className="w-4 h-4" />}
-                    label="Log"
-                    count={logs.length}
-                />
             </div>
 
             {/* Content */}
             <div className="flex-1 overflow-auto">
+                {activeTab === 'context' && (
+                    <GlobalContextPanel
+                        value={globalContext}
+                        onChange={handleContextChange}
+                        repoRoot={uiState?.job?.repo_root ?? undefined}
+                    />
+                )}
                 {activeTab === 'findings' && (
                     <FindingsPanel
                         findings={findings}
@@ -168,10 +192,10 @@ function TabButton({
     count,
 }: {
     active: boolean;
+    count?: number;
     onClick: () => void;
     icon: React.ReactNode;
     label: string;
-    count: number;
 }) {
     return (
         <button
@@ -185,7 +209,7 @@ function TabButton({
         >
             {icon}
             <span className="hidden sm:inline">{label}</span>
-            {count > 0 && (
+            {count !== undefined && count > 0 && (
                 <span className="ml-1 px-1.5 rounded-full bg-foreground/10 text-[10px]">
                     {count}
                 </span>
@@ -434,6 +458,47 @@ function LogPanel({ logs }: { logs: LogEntry[] }) {
                     </div>
                 ))
             )}
+        </div>
+    );
+}
+
+// =============================================================================
+// Global Context Panel
+// =============================================================================
+
+function GlobalContextPanel({
+    value,
+    onChange,
+    repoRoot,
+}: {
+    value: string;
+    onChange: (value: string) => void;
+    repoRoot?: string;
+}) {
+    return (
+        <div className="h-full flex flex-col p-3">
+            <div className="mb-2">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    Global Context
+                </p>
+                <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                    Injected into every prompt in this phase
+                </p>
+            </div>
+            <textarea
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                placeholder={`Repo: ${repoRoot || '/path/to/repo'}
+
+Files:
+- src/
+- tests/
+
+Invariants:
+- Don't break tests
+- Follow code style`}
+                className="flex-1 w-full bg-black/30 border border-white/10 rounded-lg p-2 text-[11px] font-mono resize-none focus:border-primary/40 focus:outline-none"
+            />
         </div>
     );
 }

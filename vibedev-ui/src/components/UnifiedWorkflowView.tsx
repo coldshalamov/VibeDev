@@ -2,9 +2,10 @@
 // Unified Workflow View - Uses Horizontal Step Flow
 // =============================================================================
 
-import { useState, useEffect } from 'react';
+import { useMemo, useEffect, useRef, useState } from 'react';
 import { HorizontalStepFlow, type Flow } from './HorizontalStepFlow';
 import { useVibeDevStore } from '@/stores/useVibeDevStore';
+import { compileUnifiedWorkflow, saveUIState } from '@/lib/api';
 
 const PHASE_LABELS: Record<string, { title: string; description: string }> = {
     research: {
@@ -39,50 +40,114 @@ type Props = {
 export function UnifiedWorkflowView({ phase }: Props) {
     const currentJobId = useVibeDevStore((state) => state.currentJobId);
     const uiState = useVibeDevStore((state) => state.uiState);
+    const setGlobalContext = useVibeDevStore((state) => state.setGlobalContext);
 
-    const storageKey = `vibedev-flow-${currentJobId}-${phase || 'all'}`;
+    const saveTimerRef = useRef<number | null>(null);
+
+    const unifiedWorkflowsFromBackend = useMemo(() => {
+        const state: any = uiState?.flow_state || null;
+        return (state?.unified_workflows || null) as Record<string, Flow> | null;
+    }, [uiState?.flow_state]);
+
+    const getPreviousPhaseContext = (currentPhase: string) => {
+        const phases = ['research', 'planning', 'execution', 'review'];
+        const idx = phases.indexOf(currentPhase);
+        if (idx <= 0) return null;
+
+        const prevPhase = phases[idx - 1];
+        const prevFlow = unifiedWorkflowsFromBackend?.[prevPhase] as any;
+        if (!prevFlow) return null;
+        const transitionStep = prevFlow.steps?.find((s: any) => s.nextPhase === currentPhase);
+        return transitionStep?.transitionContext || null;
+    };
 
     const [flow, setFlow] = useState<Flow>(() => {
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem(storageKey);
-            if (saved) {
-                try { return JSON.parse(saved); } catch { }
-            }
-        }
         const phaseInfo = phase ? PHASE_LABELS[phase] : null;
+        const prevContext = phase ? getPreviousPhaseContext(phase) : null;
+
         return {
             ...DEFAULT_FLOW,
             name: phaseInfo?.title || uiState?.job?.title || 'Workflow',
             description: phaseInfo?.description || uiState?.job?.goal || '',
+            globalContext: prevContext ? `FROM PREVIOUS PHASE:\n${prevContext}\n\n${DEFAULT_FLOW.globalContext}` : DEFAULT_FLOW.globalContext,
         };
     });
 
-    // Reload flow when phase changes
-    useEffect(() => {
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem(storageKey);
-            if (saved) {
-                try {
-                    setFlow(JSON.parse(saved));
-                    return;
-                } catch { }
-            }
+    const stepStatusById = useMemo(() => {
+        const map: Record<string, string> = {};
+        const steps = (uiState as any)?.steps || [];
+        for (const s of steps) {
+            if (s?.step_id) map[String(s.step_id)] = String(s.status || 'PENDING');
         }
+        return map;
+    }, [uiState?.steps]);
+
+    const lockCompletedSteps =
+        uiState?.job?.status === 'EXECUTING' ||
+        uiState?.job?.status === 'PAUSED' ||
+        uiState?.job?.status === 'COMPLETE';
+
+    // Reload flow when phase changes or backend state updates
+    useEffect(() => {
+        const saved = phase ? unifiedWorkflowsFromBackend?.[phase] : null;
+        if (saved) {
+            setFlow(saved);
+            return;
+        }
+
         // If no saved flow, create a new empty one for this phase
         const phaseInfo = phase ? PHASE_LABELS[phase] : null;
+        const prevContext = phase ? getPreviousPhaseContext(phase) : null;
+
         setFlow({
             ...DEFAULT_FLOW,
             name: phaseInfo?.title || uiState?.job?.title || 'Workflow',
             description: phaseInfo?.description || uiState?.job?.goal || '',
+            globalContext: prevContext ? `FROM PREVIOUS PHASE:\n${prevContext}\n\n${DEFAULT_FLOW.globalContext}` : DEFAULT_FLOW.globalContext,
         });
-    }, [phase, storageKey, uiState]);
+    }, [phase, uiState?.job?.goal, uiState?.job?.title, unifiedWorkflowsFromBackend]);
 
-    // Save flow when it changes
+    // Sync globalContext to store for sidebar access
     useEffect(() => {
-        if (currentJobId) {
-            localStorage.setItem(storageKey, JSON.stringify(flow));
+        if (phase && flow.globalContext !== undefined) {
+            setGlobalContext(phase, flow.globalContext);
         }
-    }, [flow, storageKey, currentJobId]);
+    }, [phase, flow.globalContext, setGlobalContext]);
+
+    // Listen for sidebar edits to globalContext and update flow
+    const storeContext = useVibeDevStore((state) => phase ? state.globalContextByPhase[phase] : undefined);
+    useEffect(() => {
+        if (phase && storeContext !== undefined && storeContext !== flow.globalContext) {
+            setFlow(prev => ({ ...prev, globalContext: storeContext }));
+        }
+    }, [storeContext, phase]);
+
+    // Persist to backend (debounced)
+    useEffect(() => {
+        if (!currentJobId || !phase) return;
+
+        if (saveTimerRef.current) {
+            window.clearTimeout(saveTimerRef.current);
+        }
+
+        saveTimerRef.current = window.setTimeout(() => {
+            const currentGraphState: any = uiState?.flow_state || {};
+            const unified = { ...(currentGraphState.unified_workflows || {}) };
+            unified[phase] = flow;
+
+            void saveUIState(currentJobId, {
+                ...currentGraphState,
+                unified_workflows: unified,
+            }).catch((err) => console.error('Failed to save workflow state:', err));
+        }, 500);
+
+        return () => {
+            if (saveTimerRef.current) {
+                window.clearTimeout(saveTimerRef.current);
+                saveTimerRef.current = null;
+            }
+        };
+    }, [flow, currentJobId, phase, uiState?.flow_state]);
 
     if (!currentJobId || !uiState) {
         return (
@@ -106,45 +171,39 @@ export function UnifiedWorkflowView({ phase }: Props) {
                             <h2 className="text-lg font-bold text-primary">{PHASE_LABELS[phase].title} Workflow</h2>
                             <p className="text-xs text-muted-foreground mt-0.5">{PHASE_LABELS[phase].description}</p>
                         </div>
-                        <div className="text-[10px] font-mono text-muted-foreground/50 bg-black/20 px-2 py-1 rounded border border-white/5">
+                        <div className="text-[10px] font-mono text-white bg-black/20 px-2 py-1 rounded border border-white/5">
                             Phase {['research', 'planning', 'execution', 'review'].indexOf(phase) + 1}/4
                         </div>
+                    </div>
+                    <div className="mt-2 flex items-center justify-end gap-2">
+                        <button
+                            className="px-3 py-1.5 text-xs font-bold rounded bg-primary/15 hover:bg-primary/25 border border-primary/30 text-primary transition-colors"
+                            onClick={() => {
+                                if (!currentJobId) return;
+                                void compileUnifiedWorkflow(currentJobId).catch((err) => {
+                                    console.error('Failed to compile workflow:', err);
+                                    alert('Failed to compile workflow. Check console for details.');
+                                });
+                            }}
+                            disabled={!currentJobId}
+                            title="Compile this workflow into runnable backend steps"
+                        >
+                            Compile Workflow
+                        </button>
                     </div>
                 </div>
             )}
 
-            <div className="flex-1 flex">
-                {/* Main Editor */}
-                <div className="flex-1">
-                    <HorizontalStepFlow flow={flow} onChange={setFlow} />
-                </div>
-
-                {/* Global Context Sidebar */}
-                <div className="w-72 border-l border-white/5 bg-card/30 flex flex-col">
-                    <div className="p-3 border-b border-white/5">
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                            Global Context
-                        </h3>
-                        <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                            Injected into every prompt
-                        </p>
-                    </div>
-                    <div className="flex-1 p-3">
-                        <textarea
-                            value={flow.globalContext}
-                            onChange={(e) => setFlow({ ...flow, globalContext: e.target.value })}
-                            placeholder={`Repo: ${uiState.job.repo_root || '/path/to/repo'}
-
-Files:
-- src/
-- tests/
-
-Invariants:
-- Don't break tests
-- Follow code style`}
-                            className="w-full h-full bg-black/30 border border-white/10 rounded-lg p-2 text-[11px] font-mono resize-none focus:border-primary/40 focus:outline-none"
-                        />
-                    </div>
+            <div className="flex-1 flex min-h-0">
+                {/* Main Editor - now takes full width */}
+                <div className="flex-1 overflow-hidden">
+                    <HorizontalStepFlow
+                        flow={flow}
+                        onChange={setFlow}
+                        currentPhase={phase}
+                        stepStatusById={stepStatusById}
+                        lockCompletedSteps={lockCompletedSteps}
+                    />
                 </div>
             </div>
         </div>

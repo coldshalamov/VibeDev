@@ -54,6 +54,9 @@ interface VibeDevState {
   // Clipboard for auto-prompter
   lastClipboardContent: string | null;
 
+  // Global context per phase (for sidebar editing)
+  globalContextByPhase: Record<string, string>;
+
   // Actions
   setCurrentJob: (jobId: string | null) => void;
   setUIState: (state: UIState | null) => void;
@@ -84,6 +87,10 @@ interface VibeDevState {
   isJobExecuting: () => boolean;
   canStartExecution: () => boolean;
   getCurrentStepId: () => string | null;
+
+  // Global context
+  setGlobalContext: (phase: string, value: string) => void;
+  getGlobalContext: (phase: string) => string;
 }
 
 // =============================================================================
@@ -120,6 +127,7 @@ export const useVibeDevStore = create<VibeDevState>()(
 
         selectedStepIds: [],
         lastClipboardContent: null,
+        globalContextByPhase: {},
 
         // Actions
         setCurrentJob: (jobId) => set({ currentJobId: jobId }),
@@ -253,6 +261,19 @@ export const useVibeDevStore = create<VibeDevState>()(
         getCurrentStepId: () => {
           const { uiState } = get();
           return uiState?.current_step?.step_id || null;
+        },
+
+        // Global context
+        setGlobalContext: (phase, value) =>
+          set((state) => ({
+            globalContextByPhase: {
+              ...state.globalContextByPhase,
+              [phase]: value,
+            },
+          })),
+
+        getGlobalContext: (phase) => {
+          return get().globalContextByPhase[phase] || '';
         },
       }),
       {

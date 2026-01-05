@@ -1,12 +1,14 @@
 {
   "permissions": {
-    "additionalDirectories": [
-      "C:/"
-    ],
     "allow": [
       "Bash(npm run build:*)",
       "Bash(python -m pytest tests/ -v --tb=short)",
       "Bash(python -m pytest:*)"
+    ],
+    "additionalDirectories": [
+      "C:/"
     ]
-  }
+  },
+  "outputStyle": "default",
+  "workspaceOnlyFs": false
 }

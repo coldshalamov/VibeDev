@@ -846,6 +846,22 @@ async def get_ui_state(params: JobIdInput, ctx: Context) -> dict[str, Any]:
     return await store.get_ui_state(params.job_id)
 
 
+@mcp.tool(
+    name="workflow_compile_unified",
+    annotations={
+        "title": "Compile the Studio UnifiedWorkflow into runnable steps",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def workflow_compile_unified(params: JobIdInput, ctx: Context) -> dict[str, Any]:
+    """Compile unified_workflows stored in UI state into Store steps."""
+    store = ctx.request_context.lifespan_context.store
+    return await store.workflow_compile_unified(job_id=params.job_id)
+
+
 # =============================================================================
 # Job Lifecycle Tools
 # =============================================================================

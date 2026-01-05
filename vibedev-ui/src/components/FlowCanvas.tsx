@@ -411,8 +411,13 @@ export function FlowCanvas({
           nodeTypes={nodeTypes}
           onDrop={onDrop}
           onDragOver={onDragOver}
-          fitView
+          panOnDrag
+          panOnScroll
+          nodesDraggable={false}
+          nodesConnectable={true}
+          elementsSelectable={true}
           className="bg-transparent"
+          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
         >
           <Background
             variant={BackgroundVariant.Dots}
