@@ -149,6 +149,34 @@ export function UnifiedWorkflowView({ phase }: Props) {
         };
     }, [flow, currentJobId, phase, uiState?.flow_state]);
 
+    // Save immediately on page unload (catches refresh/close)
+    useEffect(() => {
+        if (!currentJobId || !phase) return;
+
+        const handleBeforeUnload = () => {
+            // Cancel pending debounced save
+            if (saveTimerRef.current) {
+                window.clearTimeout(saveTimerRef.current);
+                saveTimerRef.current = null;
+            }
+
+            // Save immediately (synchronous)
+            const currentGraphState: any = uiState?.flow_state || {};
+            const unified = { ...(currentGraphState.unified_workflows || {}) };
+            unified[phase] = flow;
+
+            // Use sendBeacon for reliable save during page unload
+            const blob = new Blob(
+                [JSON.stringify({ graph_state: { ...currentGraphState, unified_workflows: unified } })],
+                { type: 'application/json' }
+            );
+            navigator.sendBeacon(`/api/jobs/${currentJobId}/ui-state`, blob);
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [currentJobId, phase, flow, uiState?.flow_state]);
+
     if (!currentJobId || !uiState) {
         return (
             <div className="flex h-full items-center justify-center text-muted-foreground/60">
@@ -175,22 +203,24 @@ export function UnifiedWorkflowView({ phase }: Props) {
                             Phase {['research', 'planning', 'execution', 'review'].indexOf(phase) + 1}/4
                         </div>
                     </div>
-                    <div className="mt-2 flex items-center justify-end gap-2">
-                        <button
-                            className="px-3 py-1.5 text-xs font-bold rounded bg-primary/15 hover:bg-primary/25 border border-primary/30 text-primary transition-colors"
-                            onClick={() => {
-                                if (!currentJobId) return;
-                                void compileUnifiedWorkflow(currentJobId).catch((err) => {
-                                    console.error('Failed to compile workflow:', err);
-                                    alert('Failed to compile workflow. Check console for details.');
-                                });
-                            }}
-                            disabled={!currentJobId}
-                            title="Compile this workflow into runnable backend steps"
-                        >
-                            Compile Workflow
-                        </button>
-                    </div>
+                    {!lockCompletedSteps && (
+                        <div className="mt-2 flex items-center justify-end gap-2">
+                            <button
+                                className="px-3 py-1.5 text-xs font-bold rounded bg-primary/15 hover:bg-primary/25 border border-primary/30 text-primary transition-colors"
+                                onClick={() => {
+                                    if (!currentJobId) return;
+                                    void compileUnifiedWorkflow(currentJobId).catch((err) => {
+                                        console.error('Failed to compile workflow:', err);
+                                        alert('Failed to compile workflow. Check console for details.');
+                                    });
+                                }}
+                                disabled={!currentJobId}
+                                title="Optional: compile this workflow into runnable backend steps"
+                            >
+                                Compile Workflow
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 

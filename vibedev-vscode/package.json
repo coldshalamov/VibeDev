@@ -96,6 +96,22 @@
           "default": true,
           "description": "Pause autoprompt when entering diagnose mode"
         },
+        "vibedev.autoprompt.completionDetection": {
+          "type": "string",
+          "enum": ["both", "mcp-only", "chat-only"],
+          "default": "both",
+          "description": "Completion detection strategy: 'both' (MCP + chat idle), 'mcp-only', or 'chat-only'"
+        },
+        "vibedev.autoprompt.chatIdleThresholdMs": {
+          "type": "number",
+          "default": 5000,
+          "description": "Time in ms of no chat activity to consider chat idle"
+        },
+        "vibedev.autoprompt.maxWaitTimeMs": {
+          "type": "number",
+          "default": 300000,
+          "description": "Maximum time to wait for completion (5 minutes default)"
+        },
         "vibedev.completionMarker": {
           "type": "string",
           "default": "✓ VD_READY",

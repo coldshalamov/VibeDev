@@ -53,7 +53,7 @@ Autonomous development workflow automation for Claude Code and other AI coding a
    - Copy to clipboard
    - (Optional) Paste into chat
    - (Optional) Auto-send message
-   - Wait for completion
+   - Wait for completion using dual-detection
    - Repeat until job done
 
 **Safety features:**
@@ -61,6 +61,27 @@ Autonomous development workflow automation for Claude Code and other AI coding a
 - Press ESC to stop
 - Auto-pause on diagnose mode
 - Auto-pause on human review steps
+
+**Completion Detection:**
+
+The extension uses a **dual-detection strategy** to reliably detect when Claude has finished responding:
+
+1. **MCP Server Polling**: Checks the VibeDev MCP server's `response-complete` endpoint every 2 seconds
+2. **Chat Idle Detection**: Monitors VSCode for document changes, file saves, and file creation to detect when Claude stops streaming
+
+**Detection Modes** (`vibedev.autoprompt.completionDetection`):
+- `both` (default): Proceeds when EITHER method confirms completion (redundant/safe)
+- `mcp-only`: Only uses MCP server signals (faster if MCP is reliable)
+- `chat-only`: Only uses VSCode activity monitoring (fallback if MCP signals are missed)
+
+**How Chat Idle Detection Works:**
+- Tracks document changes (Claude streaming text)
+- Monitors file saves (tool execution)
+- Detects file creation (artifacts generated)
+- Requires 3 consecutive idle checks (6 seconds total) to confirm completion
+- Configurable via `vibedev.autoprompt.chatIdleThresholdMs`
+
+This ensures the extension never fires the next prompt too early, even if the MCP server occasionally forgets to signal completion.
 
 ## Settings
 
@@ -72,6 +93,9 @@ Autonomous development workflow automation for Claude Code and other AI coding a
 | `vibedev.autoprompt.autoSend` | `false` | Auto-send messages (vs paste only) |
 | `vibedev.autoprompt.delayMs` | `1000` | Delay between steps (ms) |
 | `vibedev.autoprompt.pauseOnDiagnose` | `true` | Pause when entering diagnose mode |
+| `vibedev.autoprompt.completionDetection` | `both` | Detection strategy: `both`, `mcp-only`, or `chat-only` |
+| `vibedev.autoprompt.chatIdleThresholdMs` | `5000` | Time (ms) of no chat activity to consider idle |
+| `vibedev.autoprompt.maxWaitTimeMs` | `300000` | Maximum wait time for completion (5 minutes) |
 | `vibedev.completionMarker` | `✓ VD_READY` | Marker to detect response completion |
 
 ## Commands

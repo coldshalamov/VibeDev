@@ -34,7 +34,7 @@ export class VibedDevClient {
         try {
             const response = await fetch(`${this.baseUrl}/api/jobs/current`);
             if (!response.ok) return null;
-            const data = await response.json();
+            const data: any = await response.json();
             return data.job_id || null;
         } catch (error) {
             console.error('Failed to get current job:', error);
@@ -46,7 +46,7 @@ export class VibedDevClient {
         try {
             const response = await fetch(`${this.baseUrl}/api/jobs/${jobId}/status`);
             if (!response.ok) return null;
-            return await response.json();
+            return (await response.json()) as JobStatus;
         } catch (error) {
             console.error('Failed to get job status:', error);
             return null;
@@ -58,7 +58,7 @@ export class VibedDevClient {
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${await response.text()}`);
         }
-        return await response.json();
+        return (await response.json()) as NextPromptResponse;
     }
 
     async submitEvidence(jobId: string, evidence: any): Promise<SubmitEvidenceResponse> {
@@ -72,14 +72,14 @@ export class VibedDevClient {
             throw new Error(`HTTP ${response.status}: ${await response.text()}`);
         }
 
-        return await response.json();
+        return (await response.json()) as SubmitEvidenceResponse;
     }
 
     async checkResponseComplete(jobId: string): Promise<boolean> {
         try {
             const response = await fetch(`${this.baseUrl}/api/jobs/${jobId}/response-complete`);
             if (!response.ok) return false;
-            const data = await response.json();
+            const data: any = await response.json();
             return data.complete === true;
         } catch {
             return false;

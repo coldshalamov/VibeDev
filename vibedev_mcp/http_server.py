@@ -126,7 +126,8 @@ class AddContextBlockInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     block_type: str = Field(..., min_length=1)
     content: str = Field(..., min_length=1)
-    tags: list[str] = Field(default_factory=list)        
+    tags: list[str] = Field(default_factory=list)
+    step_id: str | None = None
 
 
 class UpdateContextBlockInput(BaseModel):
@@ -179,9 +180,28 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         )
         store = await VibeDevStore.open(effective_db)
         app.state.store = store
+        # Optional: expose the same MCP toolset over Streamable HTTP at /mcp.
+        # This enables Claude Code (or other MCP clients) to collaborate with the live UI server.
+        try:
+            import vibedev_mcp.server as mcp_server
+
+            # When mounted at /mcp, make the MCP server listen at "/" internally.
+            mcp_server.mcp.settings.streamable_http_path = "/"
+            app.state.mcp_app = mcp_server.mcp.streamable_http_app()
+            app.mount("/mcp", app.state.mcp_app)
+            app.state.mcp_manager_cm = mcp_server.mcp.session_manager.run()
+            await app.state.mcp_manager_cm.__aenter__()
+        except Exception:
+            app.state.mcp_app = None
+            app.state.mcp_manager_cm = None
         try:
             yield
         finally:
+            if getattr(app.state, "mcp_manager_cm", None) is not None:
+                try:
+                    await app.state.mcp_manager_cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
             await store.close()
 
     app = FastAPI(title="VibeDev HTTP API", version="0.1.0", lifespan=lifespan)
@@ -399,6 +419,8 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         graph_state = payload.get("graph_state")
         if graph_state:
             await store.save_flow_state(job_id, graph_state)
+            event_manager = get_event_manager()
+            await event_manager.publish(create_job_event(EVENT_JOB_UPDATED, job_id, graph_state_updated=True))
         return {"ok": True}
 
     # -------------------------------------------------------------------------
@@ -546,7 +568,12 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
     @app.get("/api/jobs/{job_id}/step-prompt")
     async def step_prompt(job_id: str, request: Request) -> dict[str, Any]:
         store = store_from(request)
-        return await store.job_next_step_prompt(job_id)
+        data = await store.job_next_step_prompt(job_id)
+        event_manager = get_event_manager()
+        await event_manager.publish(
+            create_step_event(EVENT_STEP_STARTED, job_id, str(data.get("step_id")))
+        )
+        return data
 
     @app.post("/api/jobs/{job_id}/steps/{step_id}/submit")
     async def submit_step_result(
@@ -587,15 +614,6 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
                 next_step_id=result.get("next_step_id"),
             ))
             
-            # If next step is available, publish step started event
-            next_step_id = result.get("next_step_id")
-            if next_step_id:
-                await event_manager.publish(create_step_event(
-                    EVENT_STEP_STARTED,
-                    job_id,
-                    next_step_id,
-                ))
-
         return result
 
 
@@ -696,6 +714,9 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
             prompt = prompt_data.get("prompt", "")
             marker = f"\n\n✓ VD_READY_{job_id}"
 
+            event_manager = get_event_manager()
+            await event_manager.publish(create_step_event(EVENT_STEP_STARTED, job_id, step_id))
+
             # Clear the flag so we don't loop forever.
             await store._conn.execute(
                 "UPDATE jobs SET pending_new_thread = 0 WHERE job_id = ?;",
@@ -743,6 +764,9 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         # Get the prompt
         prompt_data = await store.job_next_step_prompt(job_id)
         prompt = prompt_data.get("prompt", "")
+
+        event_manager = get_event_manager()
+        await event_manager.publish(create_step_event(EVENT_STEP_STARTED, job_id, step_id))
 
         # Add completion marker
         marker = f"\n\n✓ VD_READY_{job_id}"
@@ -826,6 +850,7 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
             block_type=payload.block_type,
             content=payload.content,
             tags=payload.tags,
+            step_id=payload.step_id,
         )
 
         event_manager = get_event_manager()
@@ -836,6 +861,7 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
                 context_id=context_id,
                 block_type=payload.block_type,
                 tags=payload.tags,
+                step_id=payload.step_id,
             )
         )
         return {"context_id": context_id}
@@ -910,6 +936,15 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         store = store_from(request)
         log_id = await store.devlog_append(job_id=job_id, content=content, step_id=step_id)
+        event_manager = get_event_manager()
+        await event_manager.publish(
+            create_job_event(
+                EVENT_DEVLOG_APPENDED,
+                job_id,
+                log_id=log_id,
+                step_id=step_id,
+            )
+        )
         return {"log_id": log_id}
 
     @app.get("/api/jobs/{job_id}/devlog")
@@ -954,6 +989,17 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
             avoid_next_time=avoid_next_time,
             tags=tags,
             related_step_id=related_step_id,
+        )
+        event_manager = get_event_manager()
+        await event_manager.publish(
+            create_job_event(
+                EVENT_MISTAKE_RECORDED,
+                job_id,
+                mistake_id=mistake_id,
+                related_step_id=related_step_id,
+                tags=tags,
+                title=title,
+            )
         )
         return {"mistake_id": mistake_id}
 

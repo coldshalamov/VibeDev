@@ -245,6 +245,13 @@ class VibeDevStore:
                 ("on_fail_step_id", "TEXT"),
                 ("workflow_json", "TEXT"),
                 ("log_instruction", "TEXT"),
+                ("run_state", "TEXT"),
+                ("run_started_at", "TEXT"),
+            ]
+        )
+        await self._ensure_context_blocks_columns(
+            [
+                ("step_id", "TEXT"),
             ]
         )
         await self._ensure_snapshot_columns(
@@ -253,6 +260,16 @@ class VibeDevStore:
             ]
         )
         await self._conn.commit()
+
+    async def _ensure_context_blocks_columns(self, columns: list[tuple[str, str]]) -> None:
+        async with self._conn.execute("PRAGMA table_info(context_blocks);") as cursor:
+            rows = await cursor.fetchall()
+        existing = {row["name"] for row in rows}
+
+        for name, decl in columns:
+            if name in existing:
+                continue
+            await self._conn.execute(f"ALTER TABLE context_blocks ADD COLUMN {name} {decl};")
 
     async def _ensure_snapshot_columns(self, columns: list[tuple[str, str]]) -> None:
         async with self._conn.execute("PRAGMA table_info(repo_snapshots);") as cursor:
@@ -386,15 +403,16 @@ class VibeDevStore:
         block_type: str,
         content: str,
         tags: list[str],
+        step_id: str | None = None,
     ) -> str:
         context_id = _new_id("CTX", length=6)
         await self._conn.execute(
             """
             INSERT INTO context_blocks (
-              context_id, job_id, block_type, content, tags_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?);
+              context_id, job_id, block_type, content, tags_json, created_at, step_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?);
             """,
-            (context_id, job_id, block_type, content, json.dumps(tags), _utc_now_iso()),
+            (context_id, job_id, block_type, content, json.dumps(tags), _utc_now_iso(), step_id),
         )
         await self._conn.commit()
         return context_id
@@ -451,7 +469,7 @@ class VibeDevStore:
         like = f"%{query}%"
         async with self._conn.execute(
             """
-            SELECT context_id, block_type, content, tags_json, created_at
+            SELECT context_id, block_type, content, tags_json, created_at, step_id
             FROM context_blocks
             WHERE job_id = ?
               AND (block_type LIKE ? OR content LIKE ?)
@@ -856,7 +874,9 @@ class VibeDevStore:
     # Unified Workflow (HorizontalStepFlow) compilation
     # =========================================================================
 
-    async def workflow_compile_unified(self, *, job_id: str) -> dict[str, Any]:
+    async def workflow_compile_unified(
+        self, *, job_id: str, allow_executing_unstarted: bool = False
+    ) -> dict[str, Any]:
         """
         Compile the Studio's UnifiedWorkflow (PROMPT / CONDITION / BREAKPOINT) into
         runnable steps in the Store.
@@ -865,7 +885,20 @@ class VibeDevStore:
         """
         job = await self.get_job(job_id)
         if job["status"] in {"EXECUTING", "PAUSED"}:
-            raise ValueError(f"Job {job_id} cannot compile workflow while status={job['status']}")
+            if not allow_executing_unstarted:
+                raise ValueError(
+                    f"Job {job_id} cannot compile workflow while status={job['status']}"
+                )
+            async with self._conn.execute(
+                "SELECT COUNT(1) AS n FROM attempts WHERE job_id = ?;",
+                (job_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            attempt_count = int(row["n"] if row else 0)
+            if attempt_count != 0:
+                raise ValueError(
+                    f"Job {job_id} cannot recompile workflow after execution began (attempts={attempt_count})"
+                )
 
         flow_state = await self.get_flow_state(job_id)
         unified = (flow_state or {}).get("unified_workflows")
@@ -1794,6 +1827,24 @@ class VibeDevStore:
             raise ValueError(f"Job {job_id} is not READY/EXECUTING (status={job['status']})")
 
         if job["status"] == "READY":
+            # If a unified workflow exists, compile it right at execution start.
+            # This keeps the workflow editable until the first prompt is requested.
+            try:
+                flow_state = await self.get_flow_state(job_id)
+                unified = (flow_state or {}).get("unified_workflows")
+                if isinstance(unified, dict) and unified:
+                    async with self._conn.execute(
+                        "SELECT COUNT(1) AS n FROM attempts WHERE job_id = ?;",
+                        (job_id,),
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                    attempt_count = int(row["n"] if row else 0)
+                    if attempt_count == 0:
+                        await self.workflow_compile_unified(job_id=job_id)
+            except Exception:
+                # Execution should still be possible if the job was created via the legacy step list.
+                pass
+
             await self._conn.execute(
                 "UPDATE jobs SET status = 'EXECUTING', updated_at = ? WHERE job_id = ?;",
                 (_utc_now_iso(), job_id),
@@ -1807,13 +1858,48 @@ class VibeDevStore:
         if job["status"] != "EXECUTING":
             raise ValueError(f"Job {job_id} is not EXECUTING (status={job['status']})")
 
-        step_order: list[str] = job["step_order"]
+        step_order: list[str] = job.get("step_order") or []
+        # If a unified workflow exists but steps were not compiled yet, attempt a safe compile
+        # right before issuing the first prompt.
+        if not step_order:
+            try:
+                flow_state = await self.get_flow_state(job_id)
+                unified = (flow_state or {}).get("unified_workflows")
+                if isinstance(unified, dict) and unified:
+                    async with self._conn.execute(
+                        "SELECT COUNT(1) AS n FROM attempts WHERE job_id = ?;",
+                        (job_id,),
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                    attempt_count = int(row["n"] if row else 0)
+                    if attempt_count == 0:
+                        await self.workflow_compile_unified(
+                            job_id=job_id, allow_executing_unstarted=True
+                        )
+                        job = await self.get_job(job_id)
+                        step_order = job.get("step_order") or []
+            except Exception:
+                pass
         idx = int(job.get("current_step_index") or 0)
         if idx < 0 or idx >= len(step_order):
             raise ValueError(f"Job {job_id} has no active step (index={idx}, steps={len(step_order)})")
 
         step_id = step_order[idx]
         step = await self._get_step(job_id, step_id)
+
+        # Mark step as running and lock it from further edits in the UI.
+        run_started_at = _utc_now_iso()
+        await self._conn.execute(
+            """
+            UPDATE steps
+            SET
+              run_state = 'RUNNING',
+              run_started_at = COALESCE(run_started_at, ?)
+            WHERE job_id = ? AND step_id = ?;
+            """,
+            (run_started_at, job_id, step_id),
+        )
+        await self._conn.commit()
 
         required_evidence = {"required": list(step["required_evidence"])}
         invariants = job["invariants"] if job["invariants"] is not None else []
@@ -1881,22 +1967,31 @@ class VibeDevStore:
 
         required_evidence["required"] = sorted(required_keys)
 
-        # Provide a standard template (even if not all keys are required).
-        evidence_template["changed_files"] = ["..."]
-        evidence_template["diff_summary"] = "..."
-        evidence_template["commands_run"] = ["..."]
-        evidence_template["tests_run"] = ["..."]
-        evidence_template["tests_passed"] = True
-        evidence_template["lint_run"] = False
-        evidence_template["lint_passed"] = None
-        evidence_template["artifacts_created"] = ["..."]
-        if step.get("acceptance_criteria"):
-            evidence_template["criteria_checklist"] = {f"c{i}": True for i in range(1, len(step["acceptance_criteria"]) + 1)}
+        # Prompt token optimization: optionally only include required keys.
+        # Default remains "full" for backwards compatibility.
+        template_mode = str(policies.get("prompt_evidence_template_mode") or "full").lower()
+        full_template: dict[str, Any] = {
+            "changed_files": ["..."],
+            "diff_summary": "...",
+            "commands_run": ["..."],
+            "tests_run": ["..."],
+            "tests_passed": True,
+            "lint_run": False,
+            "lint_passed": None,
+            "artifacts_created": ["..."],
+            "criteria_checklist": (
+                {f"c{i}": True for i in range(1, len(step.get("acceptance_criteria") or []) + 1)}
+                if step.get("acceptance_criteria")
+                else {}
+            ),
+            "notes": "...",
+            "devlog_line": "...",
+            "commit_hash": "...",
+        }
+        if template_mode == "required_only":
+            evidence_template = {k: full_template.get(k, "...") for k in sorted(required_keys)}
         else:
-            evidence_template["criteria_checklist"] = {}
-        evidence_template["notes"] = "..."
-        evidence_template["devlog_line"] = "..."
-        evidence_template["commit_hash"] = "..."
+            evidence_template = full_template
 
         what_to_produce = list(step.get("expected_outputs") or [])
         if not what_to_produce:
@@ -1931,7 +2026,10 @@ class VibeDevStore:
                 "7) Reminder of Relevant Mistakes",
                 *([f"- {m}" for m in relevant_mistakes] if relevant_mistakes else ["- (none)"]),
                 "",
-                "8) If Stuck",
+                "8) Tool Attribution",
+                f"For any tool calls that support it, set step_id='{step_id}' to attribute artifacts to this step.",
+                "",
+                "9) If Stuck",
                 remediation,
                 "",
                 "Executor directive: perform ONLY this step, then submit evidence. If any criterion is false, do NOT claim MET.",
@@ -1946,6 +2044,8 @@ class VibeDevStore:
             "invariants": invariants,
             "relevant_mistakes": relevant_mistakes,
             "required_evidence_template": evidence_template,
+            "run_state": "RUNNING",
+            "run_started_at": step.get("run_started_at") or run_started_at,
         }
 
     async def job_submit_step_result(
@@ -2103,6 +2203,7 @@ class VibeDevStore:
         accepted = False
         next_action = "RETRY"
         condition_passed: bool | None = None
+        next_step_id_for_result: str | None = None
 
         if missing_fields:
             rejection_reasons.append("Missing required evidence keys.")
@@ -2154,6 +2255,8 @@ class VibeDevStore:
                 if next_step_id:
                     next_step_id = str(next_step_id)
 
+            next_step_id_for_result = next_step_id
+
             next_idx: int | None = None
             if next_step_id and next_step_id in id_to_idx:
                 next_idx = id_to_idx[next_step_id]
@@ -2195,6 +2298,17 @@ class VibeDevStore:
                     # Logging should not block step progress.
                     pass
 
+        if not accepted:
+            # Retry stays on the same step.
+            next_step_id_for_result = step_id
+
+        # Update step run state (drives UI color + immutability).
+        await self._conn.execute(
+            "UPDATE steps SET run_state = ? WHERE job_id = ? AND step_id = ?;",
+            ("DONE" if accepted else "FAILED", job_id, step_id),
+        )
+        await self._conn.commit()
+
         attempt_id = _new_id("ATT", length=6)
         await self._conn.execute(
             """
@@ -2225,6 +2339,7 @@ class VibeDevStore:
             "accepted": accepted,
             "feedback": "OK" if accepted else "Rejected",
             "next_action": next_action,
+            "next_step_id": next_step_id_for_result,
             "missing_fields": missing_fields,
             "rejection_reasons": rejection_reasons,
         }
@@ -2404,10 +2519,16 @@ class VibeDevStore:
                 status = "DONE"
             elif job["status"] not in {"EXECUTING", "PAUSED"}:
                 status = "PENDING"
-            elif step["step_id"] == current_step_id:
-                status = "ACTIVE"
             elif step["step_id"] in accepted_steps:
                 status = "DONE"
+            elif str(step.get("run_state") or "").upper() == "RUNNING":
+                status = "RUNNING"
+            elif str(step.get("run_state") or "").upper() == "FAILED":
+                status = "FAILED"
+            elif step.get("run_started_at"):
+                status = "LOCKED"
+            elif step["step_id"] == current_step_id:
+                status = "ACTIVE"
             else:
                 status = "PENDING"
             step_statuses.append({
@@ -2486,6 +2607,211 @@ class VibeDevStore:
             if row:
                 return json.loads(row[0])
             return None
+
+    # =======================================================================
+    # Unified workflow authoring helpers (Studio graph_state.unified_workflows)
+    # =======================================================================
+
+    @staticmethod
+    def _normalize_phase(phase: str) -> str:
+        p = str(phase or "").strip().lower()
+        if p not in {"research", "planning", "execution", "review"}:
+            raise ValueError(
+                f"Invalid phase: {phase!r} (expected research|planning|execution|review)"
+            )
+        return p
+
+    async def unified_workflow_get(self, *, job_id: str) -> dict[str, Any]:
+        """Return the unified_workflows payload (phase -> Flow) from UI state."""
+        _ = await self.get_job(job_id)
+        graph_state = await self.get_flow_state(job_id) or {}
+        unified = graph_state.get("unified_workflows") or {}
+        if not isinstance(unified, dict):
+            unified = {}
+        return {"job_id": job_id, "unified_workflows": unified}
+
+    async def unified_workflow_set_flow_fields(
+        self,
+        *,
+        job_id: str,
+        phase: str,
+        name: str | None = None,
+        description: str | None = None,
+        global_context: str | None = None,
+    ) -> dict[str, Any]:
+        """Update top-level Flow fields for a phase (name/description/globalContext)."""
+        _ = await self.get_job(job_id)
+        p = self._normalize_phase(phase)
+
+        graph_state = await self.get_flow_state(job_id) or {}
+        unified = graph_state.get("unified_workflows") or {}
+        if not isinstance(unified, dict):
+            unified = {}
+        flow = unified.get(p) or {}
+        if not isinstance(flow, dict):
+            flow = {}
+
+        if name is not None:
+            flow["name"] = str(name)
+        if description is not None:
+            flow["description"] = str(description)
+        if global_context is not None:
+            flow["globalContext"] = str(global_context)
+        flow.setdefault("steps", [])
+
+        unified[p] = flow
+        graph_state["unified_workflows"] = unified
+        await self.save_flow_state(job_id, graph_state)
+        return {"ok": True, "job_id": job_id, "phase": p, "flow": flow}
+
+    async def unified_workflow_upsert_step(
+        self,
+        *,
+        job_id: str,
+        phase: str,
+        step: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Insert or update a single Step in unified_workflows[phase].steps by id."""
+        _ = await self.get_job(job_id)
+        p = self._normalize_phase(phase)
+
+        step_id = str(step.get("id") or "").strip()
+        if not step_id:
+            raise ValueError("Step must include non-empty 'id'.")
+
+        graph_state = await self.get_flow_state(job_id) or {}
+        unified = graph_state.get("unified_workflows") or {}
+        if not isinstance(unified, dict):
+            unified = {}
+        flow = unified.get(p) or {}
+        if not isinstance(flow, dict):
+            flow = {}
+        steps = flow.get("steps") or []
+        if not isinstance(steps, list):
+            steps = []
+
+        flow.setdefault("name", p.capitalize())
+        flow.setdefault("description", "")
+        flow.setdefault("globalContext", "")
+
+        replaced = False
+        next_steps: list[dict[str, Any]] = []
+        for s in steps:
+            if isinstance(s, dict) and str(s.get("id") or "") == step_id:
+                next_steps.append({**s, **step})
+                replaced = True
+            else:
+                next_steps.append(s if isinstance(s, dict) else {})
+        if not replaced:
+            next_steps.append(step)
+
+        flow["steps"] = next_steps
+        unified[p] = flow
+        graph_state["unified_workflows"] = unified
+        await self.save_flow_state(job_id, graph_state)
+        return {"ok": True, "job_id": job_id, "phase": p, "step_id": step_id}
+
+    async def unified_workflow_delete_step(
+        self,
+        *,
+        job_id: str,
+        phase: str,
+        step_id: str,
+    ) -> dict[str, Any]:
+        """Delete a Step by id from unified_workflows[phase].steps."""
+        _ = await self.get_job(job_id)
+        p = self._normalize_phase(phase)
+
+        sid = str(step_id or "").strip()
+        if not sid:
+            raise ValueError("step_id must be non-empty.")
+
+        graph_state = await self.get_flow_state(job_id) or {}
+        unified = graph_state.get("unified_workflows") or {}
+        if not isinstance(unified, dict):
+            unified = {}
+        flow = unified.get(p) or {}
+        if not isinstance(flow, dict):
+            flow = {}
+        steps = flow.get("steps") or []
+        if not isinstance(steps, list):
+            steps = []
+
+        flow["steps"] = [
+            s
+            for s in steps
+            if not (isinstance(s, dict) and str(s.get("id") or "") == sid)
+        ]
+        unified[p] = flow
+        graph_state["unified_workflows"] = unified
+        await self.save_flow_state(job_id, graph_state)
+        return {"ok": True, "job_id": job_id, "phase": p, "step_id": sid}
+
+    async def unified_workflow_connect(
+        self,
+        *,
+        job_id: str,
+        phase: str,
+        from_step_id: str,
+        to_step_id: str | None,
+        edge: str = "next",
+    ) -> dict[str, Any]:
+        """
+        Set a navigation pointer on a Step:
+        - edge='next' sets step.nextStep
+        - edge='on_pass' sets step.onPass
+        - edge='on_fail' sets step.onFail
+        """
+        _ = await self.get_job(job_id)
+        p = self._normalize_phase(phase)
+
+        src = str(from_step_id or "").strip()
+        if not src:
+            raise ValueError("from_step_id must be non-empty.")
+        dst = str(to_step_id or "").strip() or None
+
+        edge_key = {
+            "next": "nextStep",
+            "on_pass": "onPass",
+            "on_fail": "onFail",
+        }.get(str(edge or "").strip().lower())
+        if not edge_key:
+            raise ValueError("edge must be one of: next | on_pass | on_fail")
+
+        graph_state = await self.get_flow_state(job_id) or {}
+        unified = graph_state.get("unified_workflows") or {}
+        if not isinstance(unified, dict):
+            unified = {}
+        flow = unified.get(p) or {}
+        if not isinstance(flow, dict):
+            flow = {}
+        steps = flow.get("steps") or []
+        if not isinstance(steps, list):
+            steps = []
+
+        found = False
+        next_steps: list[dict[str, Any]] = []
+        for s in steps:
+            if isinstance(s, dict) and str(s.get("id") or "") == src:
+                found = True
+                next_steps.append({**s, edge_key: dst})
+            else:
+                next_steps.append(s if isinstance(s, dict) else {})
+        if not found:
+            raise ValueError(f"Step {src!r} not found in phase {p}.")
+
+        flow["steps"] = next_steps
+        unified[p] = flow
+        graph_state["unified_workflows"] = unified
+        await self.save_flow_state(job_id, graph_state)
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "phase": p,
+            "from": src,
+            "to": dst,
+            "edge": edge_key,
+        }
 
     async def job_export_markdown(self, job_id: str) -> str:
         """Export job history and state to a comprehensive Markdown report."""

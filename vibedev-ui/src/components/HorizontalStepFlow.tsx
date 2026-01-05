@@ -9,13 +9,13 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useClickOutside } from '@/hooks/useClickOutside';
 import { cn } from '@/lib/utils';
+import { useJobStepEvents } from '@/hooks/jobEventBus';
 import {
     PlusIcon,
     TrashIcon,
     ChevronDownIcon,
     CodeBracketIcon,
     XMarkIcon,
-    ArrowsPointingOutIcon, // Drag icon
     DocumentTextIcon, // For Prompt
 } from '@heroicons/react/24/outline';
 
@@ -273,13 +273,19 @@ function StepCard({
 
     const borderColor = status === 'DONE'
         ? 'border-green-500/50'
-        : status === 'ACTIVE'
-            ? 'border-blue-500/50'
-            : step.type === 'PROMPT'
-                ? 'border-primary/40'
-                : step.type === 'CONDITION'
-                    ? 'border-purple-500/40'
-                    : 'border-yellow-500/40';
+        : status === 'RUNNING'
+            ? 'border-red-500/60'
+            : status === 'FAILED'
+                ? 'border-orange-500/60'
+                : status === 'LOCKED'
+                    ? 'border-yellow-500/50'
+                    : status === 'ACTIVE'
+                        ? 'border-blue-500/50'
+                        : step.type === 'PROMPT'
+                            ? 'border-primary/40'
+                            : step.type === 'CONDITION'
+                                ? 'border-purple-500/40'
+                                : 'border-yellow-500/40';
 
     const bgColor = step.type === 'PROMPT'
         ? 'bg-primary/5'
@@ -295,7 +301,11 @@ function StepCard({
             : 'text-yellow-400 bg-yellow-500/20';
 
     const isMainThread = step.subThreadLevel === 0;
-    const isLocked = Boolean(lockCompletedSteps && status === 'DONE');
+    const isLocked = Boolean(
+        lockCompletedSteps
+        && ['RUNNING', 'DONE', 'FAILED', 'LOCKED'].includes(String(status || ''))
+    );
+    const stepEvents = useJobStepEvents(status === 'RUNNING' ? step.id : null);
     const safeOnChange = (next: Step) => {
         if (isLocked) return;
         onChange(next);
@@ -314,28 +324,44 @@ function StepCard({
             )}
             onClick={onSelect}
         >
-            {/* Header / Drag Handle */}
-            <div className="flex items-center justify-between p-2 border-b border-white/10 group">
+            {/* Header / Drag Handle - Draggable Area */}
+            <div
+                className={cn(
+                    "flex items-center justify-between p-2 border-b border-white/10 group",
+                    !isMainThread && "cursor-move hover:bg-white/5 active:bg-white/10 transition-colors"
+                )}
+                onMouseDown={(e) => {
+                    if (!isMainThread) onDragStart(e);
+                }}
+            >
                 <div className="flex items-center gap-2">
-                    {!isMainThread ? (
-                        <div
-                            className="cursor-move p-1 hover:bg-white/10 rounded text-muted-foreground hover:text-white"
-                            onMouseDown={onDragStart}
-                            title="Drag horizontal"
-                        >
-                            <ArrowsPointingOutIcon className="w-4 h-4" />
-                        </div>
-                    ) : (
-                        <div className="p-1"><span className="text-[10px] text-primary/40 font-mono">FIXED</span></div>
-                    )}
+                    {/* Fixed Label or Spacer */}
+                    {isMainThread ? (
+                        <div className="pr-1"><span className="text-[10px] text-primary/40 font-mono">FIXED</span></div>
+                    ) : null}
 
                     <div className={cn("w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold", typeColor)}>
                         {typeIcon}
                     </div>
-                    <span className="text-xs font-bold text-muted-foreground">{step.label}</span>
+                    <span className="text-xs font-bold text-muted-foreground select-none">{step.label}</span>
+                    {status === 'RUNNING' && (
+                        <span className="text-[9px] font-bold text-red-200 bg-red-500/15 border border-red-500/30 px-1.5 py-0.5 rounded">
+                            RUNNING
+                        </span>
+                    )}
                     {status === 'DONE' && (
                         <span className="text-[9px] font-bold text-green-300 bg-green-500/15 border border-green-500/30 px-1.5 py-0.5 rounded">
                             DONE
+                        </span>
+                    )}
+                    {status === 'FAILED' && (
+                        <span className="text-[9px] font-bold text-orange-200 bg-orange-500/15 border border-orange-500/30 px-1.5 py-0.5 rounded">
+                            FAILED
+                        </span>
+                    )}
+                    {status === 'LOCKED' && (
+                        <span className="text-[9px] font-bold text-yellow-200 bg-yellow-500/15 border border-yellow-500/30 px-1.5 py-0.5 rounded">
+                            LOCKED
                         </span>
                     )}
                     {status === 'ACTIVE' && (
@@ -470,7 +496,7 @@ function StepCard({
                                 <label className="text-[9px] uppercase font-bold text-muted-foreground">Type</label>
                                 <select
                                     className="w-full bg-black/20 border border-white/10 rounded p-1 text-xs mt-0.5"
-                                    value={step.conditionType || 'script'}      
+                                    value={step.conditionType || 'script'}
                                     onChange={(e) => safeOnChange({ ...step, conditionType: e.target.value as 'script' | 'llm' })}
                                     disabled={isLocked}
                                 >
@@ -535,6 +561,25 @@ function StepCard({
                         />
                     </div>
 
+                    {status === 'RUNNING' && (
+                        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-2">
+                            <div className="text-[9px] uppercase font-bold text-red-200 mb-1">Live activity</div>
+                            {stepEvents.length === 0 ? (
+                                <div className="text-[11px] text-muted-foreground">Waiting for events…</div>
+                            ) : (
+                                <div className="space-y-1 max-h-28 overflow-auto pr-1">
+                                    {stepEvents.slice(0, 6).map((e, idx) => (
+                                        <div key={idx} className="text-[11px] text-white/80">
+                                            <span className="text-white/50">{e.type}</span>
+                                            {e?.data?.block_type ? <span className="text-white/60"> · {String(e.data.block_type)}</span> : null}
+                                            {e?.data?.title ? <span className="text-white/60"> · {String(e.data.title).slice(0, 60)}</span> : null}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* ALWAYS SHOW NEXT STEP SELECT */}
                     <div className="pt-2 border-t border-white/5">
                         <div className="grid grid-cols-1 gap-2">
@@ -564,7 +609,7 @@ function StepCard({
                                             <label className="text-[9px] uppercase font-bold text-red-400">On Fail →</label>
                                             <select
                                                 className="w-full bg-black/20 border border-red-500/30 rounded p-1 text-[10px] mt-0.5"
-                                                value={step.onFail || ''}       
+                                                value={step.onFail || ''}
                                                 onChange={(e) => safeOnChange({ ...step, onFail: e.target.value })}
                                                 disabled={isLocked}
                                             >
@@ -1032,10 +1077,10 @@ export function HorizontalStepFlow({
                                 <StepCard
                                     step={step}
                                     allSteps={steps}
-                                    onChange={(s) => updateStep(step.id, s)}    
+                                    onChange={(s) => updateStep(step.id, s)}
                                     onDelete={() => onChange({ ...flow, steps: flow.steps.filter(x => x.id !== step.id) })}
                                     isSelected={selectedId === step.id}
-                                    onSelect={() => setSelectedId(step.id)}     
+                                    onSelect={() => setSelectedId(step.id)}
                                     onDragStart={(e) => handleDragStart(e, step)}
                                     currentPhase={currentPhase}
                                     status={stepStatusById?.[step.id]}

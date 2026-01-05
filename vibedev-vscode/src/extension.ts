@@ -70,7 +70,7 @@ function registerCommands(context: vscode.ExtensionContext) {
                 }
 
                 // Copy prompt to clipboard
-                await vscode.env.clipboard.writeText(response.prompt);
+                await vscode.env.clipboard.writeText(response.prompt || '');
 
                 const action = await vscode.window.showInformationMessage(
                     `Step prompt copied to clipboard. Paste into chat?`,
@@ -79,7 +79,7 @@ function registerCommands(context: vscode.ExtensionContext) {
                 );
 
                 if (action === 'Paste Now') {
-                    await pasteIntoChat(response.prompt);
+                    await pasteIntoChat(response.prompt || '');
                 }
             } catch (error) {
                 vscode.window.showErrorMessage(`VibeDev error: ${error}`);

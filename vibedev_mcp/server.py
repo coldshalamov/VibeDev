@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from vibedev_mcp.conductor import compute_next_questions
 from vibedev_mcp.models import ModelClaim
 from vibedev_mcp.store import VibeDevStore
+from vibedev_mcp.events import EVENT_JOB_UPDATED, create_job_event, get_event_manager
 from vibedev_mcp.templates import get_template, list_templates
 
 
@@ -860,6 +861,134 @@ async def workflow_compile_unified(params: JobIdInput, ctx: Context) -> dict[str
     """Compile unified_workflows stored in UI state into Store steps."""
     store = ctx.request_context.lifespan_context.store
     return await store.workflow_compile_unified(job_id=params.job_id)
+
+
+class UnifiedWorkflowPhaseInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    job_id: str = Field(..., min_length=1)
+    phase: str = Field(..., min_length=1, description="research | planning | execution | review")
+
+
+@mcp.tool(
+    name="workflow_unified_get",
+    annotations={
+        "title": "Get the Studio unified workflow graph",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def workflow_unified_get(params: JobIdInput, ctx: Context) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    return await store.unified_workflow_get(job_id=params.job_id)
+
+
+class UnifiedWorkflowSetFlowFieldsInput(UnifiedWorkflowPhaseInput):
+    name: str | None = None
+    description: str | None = None
+    global_context: str | None = None
+
+
+@mcp.tool(
+    name="workflow_unified_set_flow_fields",
+    annotations={
+        "title": "Set unified workflow phase flow fields",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def workflow_unified_set_flow_fields(
+    params: UnifiedWorkflowSetFlowFieldsInput, ctx: Context
+) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    result = await store.unified_workflow_set_flow_fields(
+        job_id=params.job_id,
+        phase=params.phase,
+        name=params.name,
+        description=params.description,
+        global_context=params.global_context,
+    )
+    event_manager = get_event_manager()
+    await event_manager.publish(create_job_event(EVENT_JOB_UPDATED, params.job_id))
+    return result
+
+
+class UnifiedWorkflowUpsertStepInput(UnifiedWorkflowPhaseInput):
+    step: dict[str, Any] = Field(..., description="Step object matching Studio Step schema")
+
+
+@mcp.tool(
+    name="workflow_unified_upsert_step",
+    annotations={
+        "title": "Insert or update a step in unified workflow",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def workflow_unified_upsert_step(params: UnifiedWorkflowUpsertStepInput, ctx: Context) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    result = await store.unified_workflow_upsert_step(job_id=params.job_id, phase=params.phase, step=params.step)
+    event_manager = get_event_manager()
+    await event_manager.publish(create_job_event(EVENT_JOB_UPDATED, params.job_id))
+    return result
+
+
+class UnifiedWorkflowDeleteStepInput(UnifiedWorkflowPhaseInput):
+    step_id: str = Field(..., min_length=1)
+
+
+@mcp.tool(
+    name="workflow_unified_delete_step",
+    annotations={
+        "title": "Delete a step from unified workflow",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def workflow_unified_delete_step(params: UnifiedWorkflowDeleteStepInput, ctx: Context) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    result = await store.unified_workflow_delete_step(job_id=params.job_id, phase=params.phase, step_id=params.step_id)
+    event_manager = get_event_manager()
+    await event_manager.publish(create_job_event(EVENT_JOB_UPDATED, params.job_id))
+    return result
+
+
+class UnifiedWorkflowConnectInput(UnifiedWorkflowPhaseInput):
+    from_step_id: str = Field(..., min_length=1)
+    to_step_id: str | None = None
+    edge: str = Field(default="next", description="next | on_pass | on_fail")
+
+
+@mcp.tool(
+    name="workflow_unified_connect",
+    annotations={
+        "title": "Connect steps in unified workflow",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def workflow_unified_connect(params: UnifiedWorkflowConnectInput, ctx: Context) -> dict[str, Any]:
+    store = ctx.request_context.lifespan_context.store
+    result = await store.unified_workflow_connect(
+        job_id=params.job_id,
+        phase=params.phase,
+        from_step_id=params.from_step_id,
+        to_step_id=params.to_step_id,
+        edge=params.edge,
+    )
+    event_manager = get_event_manager()
+    await event_manager.publish(create_job_event(EVENT_JOB_UPDATED, params.job_id))
+    return result
 
 
 # =============================================================================

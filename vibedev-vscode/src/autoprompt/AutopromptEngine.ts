@@ -21,6 +21,9 @@ export class AutopromptEngine {
         );
         this.statusBarItem.command = 'vibedev.stopAutoprompt';
         this.context.subscriptions.push(this.statusBarItem);
+
+        // Set up document change listener for chat idle detection
+        this.setupDocumentChangeListener();
     }
 
     async start(jobId: string): Promise<void> {
@@ -184,15 +187,191 @@ export class AutopromptEngine {
     }
 
     private async waitForCompletion(timeoutMs: number): Promise<void> {
-        // Simple timeout-based approach for now
-        // In a more sophisticated version, we could poll the server
-        // to check if evidence was submitted
-        await this.sleep(timeoutMs);
+        if (!this.currentJobId) return;
 
-        // TODO: Implement actual completion detection
-        // Option 1: Poll server for response-complete status
-        // Option 2: Watch for completion marker in chat (harder)
-        // Option 3: Just use timeout (current approach)
+        // Get configuration
+        const config = vscode.workspace.getConfiguration('vibedev.autoprompt');
+        const detectionMode = config.get<string>('completionDetection') || 'both';
+        const maxWaitTime = config.get<number>('maxWaitTimeMs') || 300000;
+        const pollInterval = 2000; // Check every 2 seconds
+        const startTime = Date.now();
+
+        console.log('[AutopromptEngine] Waiting for completion with strategy:', detectionMode);
+
+        let mcpComplete = false;
+        let chatComplete = false;
+        let consecutiveChatIdleChecks = 0;
+        const requiredConsecutiveIdleChecks = 3; // Need 3 consecutive idle checks (6 seconds total)
+
+        while (Date.now() - startTime < maxWaitTime) {
+            // Check if aborted
+            if (this.abortController?.signal.aborted) {
+                console.log('[AutopromptEngine] Aborted during wait');
+                return;
+            }
+
+            // Method 1: Check MCP server
+            if (detectionMode === 'both' || detectionMode === 'mcp-only') {
+                try {
+                    mcpComplete = await this.client.checkResponseComplete(this.currentJobId);
+                } catch (error) {
+                    console.warn('[AutopromptEngine] MCP check failed:', error);
+                }
+            }
+
+            // Method 2: Check VSCode chat state
+            if (detectionMode === 'both' || detectionMode === 'chat-only') {
+                const isIdle = await this.checkChatIdle();
+                if (isIdle) {
+                    consecutiveChatIdleChecks++;
+                    if (consecutiveChatIdleChecks >= requiredConsecutiveIdleChecks) {
+                        chatComplete = true;
+                    }
+                } else {
+                    consecutiveChatIdleChecks = 0;
+                    chatComplete = false;
+                }
+            }
+
+            // Determine if we're complete based on strategy
+            let isComplete = false;
+            if (detectionMode === 'both') {
+                // Both methods must agree (OR logic for redundancy)
+                isComplete = mcpComplete || chatComplete;
+            } else if (detectionMode === 'mcp-only') {
+                isComplete = mcpComplete;
+            } else if (detectionMode === 'chat-only') {
+                isComplete = chatComplete;
+            }
+
+            if (isComplete) {
+                // Wait additional buffer time to ensure model fully stopped
+                console.log('[AutopromptEngine] Initial completion detected, waiting buffer time...');
+                await this.sleep(2000);
+
+                // Double-check conditions one final time
+                let finalComplete = false;
+                if (detectionMode === 'both' || detectionMode === 'mcp-only') {
+                    const finalMcpCheck = await this.client.checkResponseComplete(this.currentJobId);
+                    finalComplete = finalMcpCheck;
+                }
+                if (detectionMode === 'both' || detectionMode === 'chat-only') {
+                    const finalChatCheck = await this.checkChatIdle();
+                    finalComplete = finalComplete || finalChatCheck;
+                }
+
+                if (finalComplete) {
+                    const elapsed = Date.now() - startTime;
+                    console.log('[AutopromptEngine] Completion confirmed:', {
+                        mode: detectionMode,
+                        mcp: mcpComplete,
+                        chat: chatComplete,
+                        elapsed: elapsed
+                    });
+                    return;
+                }
+
+                // False alarm, reset and continue
+                console.log('[AutopromptEngine] False alarm, continuing to wait...');
+                consecutiveChatIdleChecks = 0;
+            }
+
+            // Wait before next poll
+            await this.sleep(pollInterval);
+        }
+
+        // Timeout reached - warn but continue
+        const elapsed = Date.now() - startTime;
+        vscode.window.showWarningMessage(`⚠️ Completion detection timeout after ${elapsed}ms. Proceeding anyway.`);
+        console.warn('[AutopromptEngine] Completion detection timeout after', elapsed, 'ms');
+    }
+
+    private async checkChatIdle(): Promise<boolean> {
+        // VSCode doesn't expose direct chat state APIs, so we use heuristics:
+        // Monitor document changes as a proxy for "model is still typing"
+
+        try {
+            const config = vscode.workspace.getConfiguration('vibedev.autoprompt');
+            const idleThreshold = config.get<number>('chatIdleThresholdMs') || 5000;
+
+            const now = Date.now();
+            const lastChangeTime = this.lastDocumentChangeTime || 0;
+            const timeSinceLastChange = now - lastChangeTime;
+
+            // If no changes in the threshold time, consider chat idle
+            const isIdle = timeSinceLastChange >= idleThreshold;
+
+            if (isIdle && timeSinceLastChange < idleThreshold + 10000) {
+                // Log only when transitioning to idle (within 10s window)
+                console.log(`[AutopromptEngine] Chat idle for ${timeSinceLastChange}ms`);
+            }
+
+            return isIdle;
+        } catch (error) {
+            // If we can't determine chat state, assume not idle
+            // (fail-safe: rely on MCP check or timeout)
+            console.warn('[AutopromptEngine] Error checking chat idle state:', error);
+            return false;
+        }
+    }
+
+    private lastDocumentChangeTime: number = 0;
+
+    private setupDocumentChangeListener(): void {
+        // Listen for document changes to track when the model is actively responding
+        // This is our primary signal that Claude is still streaming output
+
+        this.context.subscriptions.push(
+            vscode.workspace.onDidChangeTextDocument((event) => {
+                // Track ANY document changes while autoprompt is running
+                // This catches Claude's responses being streamed into the chat
+                if (this.isRunning && event.contentChanges.length > 0) {
+                    // Filter out user typing (changes are typically larger when Claude is responding)
+                    // or any changes to specific document types
+                    const uri = event.document.uri;
+                    const isUserFile = uri.scheme === 'file';
+                    const hasSubstantialChange = event.contentChanges.some(change =>
+                        change.text.length > 10 || change.rangeLength > 10
+                    );
+
+                    // Update timestamp if:
+                    // 1. It's not a regular file (could be chat/output)
+                    // 2. OR it's a substantial change (likely Claude's response)
+                    if (!isUserFile || hasSubstantialChange) {
+                        const now = Date.now();
+                        const timeSinceLast = now - this.lastDocumentChangeTime;
+
+                        // Log frequent updates (likely streaming)
+                        if (timeSinceLast < 1000) {
+                            console.log('[AutopromptEngine] Detected active streaming');
+                        }
+
+                        this.lastDocumentChangeTime = now;
+                    }
+                }
+            })
+        );
+
+        // Also monitor file system changes (Claude often creates/modifies files)
+        // This catches tool execution that creates artifacts
+        this.context.subscriptions.push(
+            vscode.workspace.onDidSaveTextDocument((document) => {
+                if (this.isRunning) {
+                    this.lastDocumentChangeTime = Date.now();
+                    console.log('[AutopromptEngine] File save detected:', document.uri.fsPath);
+                }
+            })
+        );
+
+        // Monitor when new files are created (tool outputs, etc.)
+        this.context.subscriptions.push(
+            vscode.workspace.onDidCreateFiles((event) => {
+                if (this.isRunning && event.files.length > 0) {
+                    this.lastDocumentChangeTime = Date.now();
+                    console.log('[AutopromptEngine] Files created:', event.files.length);
+                }
+            })
+        )
     }
 
     private sleep(ms: number): Promise<void> {

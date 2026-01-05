@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from './useUIState';
+import { jobEventBus } from './jobEventBus';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL ?? '';
 const API_PREFIX = (import.meta as any).env?.VITE_API_PREFIX ?? '/api';
@@ -16,10 +17,11 @@ export function useJobEvents(jobId: string | null) {
 
     es.onmessage = (event) => {
       try {
-        const parsed = JSON.parse(event.data) as { type: string };
-        if (parsed.type === 'job_updated' || parsed.type === 'phase_changed') { 
+        const parsed = JSON.parse(event.data) as { type: string; data?: any; timestamp?: string; job_id?: string };
+        jobEventBus.push(parsed);
+        if (parsed.type === 'job_updated' || parsed.type === 'phase_changed') {
           queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
-          queryClient.invalidateQueries({ queryKey: queryKeys.jobsList() });    
+          queryClient.invalidateQueries({ queryKey: queryKeys.jobsList() });
           queryClient.invalidateQueries({ queryKey: ['jobs', jobId, 'context'] });
         } else {
           queryClient.invalidateQueries({ queryKey: queryKeys.uiState(jobId) });
