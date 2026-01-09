@@ -72,7 +72,9 @@ VibeDev makes AI development **deterministic**:
 
 ### Installation
 
-Prereqs: Python 3.11+
+Prereqs:
+- Python 3.11+
+- Node.js 20+ (CI uses Node 20)
 
 ```bash
 python -m pip install -e .
@@ -100,7 +102,7 @@ vibedev-mcp serve
 Terminal 2:
 ```bash
 cd vibedev-ui
-npm install
+npm ci
 npm run dev
 ```
 
