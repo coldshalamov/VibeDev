@@ -148,14 +148,14 @@ export const useVibeDevStore = create<VibeDevState>()(
           const statusChanged = prevStatus !== status;
           const currentMode = get().viewMode.mode;
 
-          // When the user selects a different job, pick a sensible default tab
+          // When the user selects a different job, pick a sensible default tab 
           // based on job status.
           if (jobChanged) {
             if (status === 'PLANNING') {
-              set({ viewMode: { mode: 'research' } });
+              set({ viewMode: { mode: 'planning' } });
             } else if (status === 'EXECUTING' || status === 'READY') {
               set({ viewMode: { mode: 'execution' } });
-            } else if (status === 'COMPLETE' || status === 'ARCHIVED') {
+            } else if (status === 'COMPLETE' || status === 'ARCHIVED') {        
               set({ viewMode: { mode: 'review' } });
             }
             return;

@@ -7,9 +7,6 @@ import { useVibeDevStore, useViewMode, useTheme } from '@/stores/useVibeDevStore
 import { useUIState, useCreateJob } from '@/hooks/useUIState';
 import { useJobEvents } from '@/hooks/useJobEvents';
 import { InfoSidebar } from '@/components/InfoSidebar';
-import { MainCanvas } from '@/components/MainCanvas';
-import { ResearchDashboard } from '@/components/ResearchDashboard';
-import { ExecutionDashboard } from '@/components/ExecutionDashboard';
 import { AutomationCockpit } from '@/components/AutomationCockpit';
 import { JobSelector } from '@/components/JobSelector';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
@@ -296,7 +293,7 @@ function EmptyState() {
   );
 }
 
-function ReviewView() {
+export function ReviewView() {
   const uiState = useVibeDevStore((state) => state.uiState);
 
   if (!uiState) return null;

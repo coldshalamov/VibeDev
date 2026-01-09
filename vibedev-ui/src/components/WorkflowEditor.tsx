@@ -6,7 +6,7 @@
 // - BREAKPOINT: Start fresh thread with clean context
 // - CONDITION: Logic gate (hard=script, soft=LLM judgment)
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useClickOutside } from '@/hooks/useClickOutside';
 import { cn } from '@/lib/utils';
 import {
@@ -18,8 +18,6 @@ import {
     ArrowDownIcon,
     ArrowPathIcon,
     DocumentArrowDownIcon,
-    DocumentArrowUpIcon,
-    PlayIcon,
 } from '@heroicons/react/24/outline';
 
 // =============================================================================
@@ -622,6 +620,9 @@ type WorkflowEditorProps = {
 };
 
 export function WorkflowEditor({ workflow, onChange, onExport, onImport }: WorkflowEditorProps) {
+    void onExport;
+    void onImport;
+
     const generateId = () => `block_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
     const addBlock = useCallback((type: WorkflowBlock['type']) => {

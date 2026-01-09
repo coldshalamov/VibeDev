@@ -91,6 +91,8 @@ export function AutomationCockpit({ compact = false }: AutomationCockpitProps) {
     );
   }
 
+  if (!uiState) return null;
+
   // Full panel view
   return (
     <div className="panel">
