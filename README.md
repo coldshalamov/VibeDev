@@ -80,6 +80,10 @@ Prereqs:
 python -m pip install -e .
 ```
 
+Optional (recommended) one-shot setup script:
+- Windows: `scripts/bootstrap.ps1`
+- macOS/Linux: `scripts/bootstrap.sh`
+
 ### Run the MCP Server
 
 For AI agents (stdio):
