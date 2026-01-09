@@ -1,17 +1,13 @@
 """Tests for the evidence validation module."""
 
-import pytest
 from pathlib import Path
 import tempfile
-import os
 
 from vibedev_mcp.evidence import (
     validate_evidence,
     validate_summary,
     merge_validation_results,
     EvidenceValidationResult,
-    MIN_DIFF_SUMMARY_LENGTH,
-    MIN_SUMMARY_LENGTH,
 )
 
 

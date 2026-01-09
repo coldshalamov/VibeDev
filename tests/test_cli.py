@@ -1,11 +1,9 @@
 """Tests for the CLI module."""
 
 import pytest
-import sys
-import asyncio
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch
 
 from vibedev_mcp.cli import main, _status_job, _list_jobs
 

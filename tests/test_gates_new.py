@@ -1,11 +1,10 @@
 """Tests for the gates execution module."""
 
 import pytest
-import asyncio
 import tempfile
 from pathlib import Path
 
-from vibedev_mcp.gates import (
+from vibedev_mcp.gates import (  
     GateResult,
     command_matches_allowlist,
     execute_shell_gate,

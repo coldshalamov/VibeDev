@@ -176,7 +176,7 @@ async def _status_job(*, job_id: str) -> int:
         active_steps = [s for s in steps if s.get("status") == "ACTIVE"]
         if active_steps:
             current = active_steps[0]
-            print(f"\n--- Current Step ---")
+            print("\n--- Current Step ---")
             print(f"Title: {current.get('title', 'Untitled')}")
             print(f"Attempts: {current.get('attempt_count', 0)}")
 
@@ -268,4 +268,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

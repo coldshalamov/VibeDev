@@ -7,7 +7,6 @@ and repository snapshots.
 
 from __future__ import annotations
 
-import asyncio
 import fnmatch
 import json
 import re
@@ -16,7 +15,6 @@ import string
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from pathlib import PurePosixPath
 from typing import Any
 
 import aiosqlite

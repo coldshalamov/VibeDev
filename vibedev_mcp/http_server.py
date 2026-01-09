@@ -23,7 +23,6 @@ from vibedev_mcp.events import (
     SSEEvent,
     EVENT_JOB_CREATED,
     EVENT_JOB_UPDATED,
-    EVENT_JOB_STATUS_CHANGED,
     EVENT_STEP_STARTED,
     EVENT_STEP_COMPLETED,
     EVENT_ATTEMPT_SUBMITTED,
@@ -324,8 +323,8 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
 
     @app.get("/api/templates/{template_id}")
     async def get_template_detail(template_id: str, request: Request) -> dict[str, Any]:
-        """Get full template details including steps, gates, and policies."""
-        from vibedev_mcp.templates import get_template, list_templates
+        """Get full template details including steps, gates, and policies."""   
+        from vibedev_mcp.templates import get_template
 
         # First check built-in templates
         try:

@@ -4,7 +4,6 @@ import os
 import shutil
 import tempfile
 import pytest
-import json
 
 @pytest.mark.asyncio
 async def test_checkpoint_injection():

@@ -9,9 +9,6 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import os
-import shlex
-import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -93,14 +90,7 @@ async def execute_shell_gate(
         run_env.update(env)
 
     # Determine shell based on platform
-    if sys.platform == "win32":
-        # On Windows, run through cmd.exe
-        shell = True
-        args = command
-    else:
-        # On Unix, run through /bin/sh
-        shell = True
-        args = command
+    args = command
 
     try:
         # Run the command
@@ -368,7 +358,7 @@ async def evaluate_gate(
 
         allowlist = policies.get("shell_gate_allowlist", [])
         if allowlist and not command_matches_allowlist(command, allowlist):
-            return GateResult(False, gate_type, description, f"Command not in allowlist")
+            return GateResult(False, gate_type, description, "Command not in allowlist")
 
         timeout = params.get("timeout", 60)
         passed, output, exit_code = await execute_shell_gate(command, cwd=repo_root, timeout=timeout)
