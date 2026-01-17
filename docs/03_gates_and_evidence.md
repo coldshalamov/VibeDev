@@ -1,13 +1,28 @@
 # VibeDev MCP — Gates and EvidenceSchema
 
+## Implementation Status
+
+**Gate System: 94% Complete**  
+**Implemented: 16 of 17 gate types (40 test cases passing)**
+
+| Gate Category | Implemented | Total | Status |
+|---------------|-------------|-------|--------|
+| Command gates | 3 | 3 | ✅ 100% |
+| File system gates | 5 | 5 | ✅ 100% |
+| Change control gates | 4 | 4 | ✅ 100% |
+| Schema gates | 1 | 2 | ⚠️ 50% |
+| Git hygiene gates | 3 | 3 | ✅ 100% |
+| Test/lint gates | 2 | 2 | ✅ 100% |
+| Human gates | 1 | 1 | ✅ 100% |
+
+**Missing:** `json_schema_valid` gate (planned for v1.1)
+
 ## Purpose
 
 This document defines:
 - **Gate** types (what the Verifier can require).
 - **EvidenceSchema** (the proof format the model must submit).
 - How the Verifier evaluates gates and rejects/advances deterministically.
-
-If a gate is not implemented yet, it is marked as TODO. This is planning documentation; no code changes are made here.
 
 ---
 

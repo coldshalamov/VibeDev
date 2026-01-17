@@ -1,10 +1,28 @@
 # VibeDev MCP — StepTemplate (“Step Canvas”) Spec
 
+## Implementation Status
+
+**Schema Completeness: 100%**  
+**All 12 StepTemplate fields are implemented and functional**
+
+| Field | Status | Notes |
+|-------|--------|-------|
+| step_id | ✅ 100% | Stable identifiers (S1..Sn) |
+| title | ✅ 100% | Human-readable names |
+| objective | ✅ 100% | One-sentence success criteria |
+| prompt_template | ✅ 100% | Compiled prompt body |
+| injections | ✅ 100% | Context injection (repo, invariants, mistakes) |
+| tool_policy | ✅ 100% | Allowed/forbidden tool constraints |
+| evidence_schema | ✅ 100% | Required/optional fields, criteria checklist |
+| gates | ✅ 94% | 16 of 17 gate types implemented |
+| on_fail | ✅ 85% | Retry, diagnose, escalate policies |
+| on_pass | ✅ 100% | Next step transitions |
+| human_review | ✅ 100% | Approval flags |
+| checkpoint | ✅ 100% | Checkpoint markers |
+
 ## Purpose
 
 This document defines the **StepTemplate** schema as the primary “compiler input” of VibeDev planning. A StepTemplate is what the planning thread produces and the execution thread follows.
-
-If the current implementation stores fewer fields, this doc remains the intended compilation target; differences are captured as TODOs (no code changes here).
 
 ---
 

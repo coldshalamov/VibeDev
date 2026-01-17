@@ -217,6 +217,18 @@ class VibeDevStore:
               updated_at TEXT NOT NULL,
               FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS gate_results (
+              result_id TEXT PRIMARY KEY,
+              attempt_id TEXT NOT NULL,
+              gate_type TEXT NOT NULL,
+              passed INTEGER NOT NULL,
+              description TEXT,
+              details TEXT,
+              output TEXT,
+              exit_code INTEGER,
+              FOREIGN KEY (attempt_id) REFERENCES attempts(attempt_id) ON DELETE CASCADE
+            );
             """
         )
         await self._ensure_jobs_columns(
@@ -377,6 +389,26 @@ class VibeDevStore:
         )
         await self._conn.commit()
         return await self.get_job(job_id)
+
+    async def get_gate_results(self, *, attempt_id: str) -> list[dict[str, Any]]:
+        """Retrieve gate results for an attempt."""
+        async with self._conn.execute(
+            "SELECT * FROM gate_results WHERE attempt_id = ? ORDER BY result_id ASC;",
+            (attempt_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        return [
+            {
+                "gate_type": row["gate_type"],
+                "passed": bool(row["passed"]),
+                "description": row["description"],
+                "details": row["details"],
+                "output": row["output"],
+                "exit_code": row["exit_code"],
+            }
+            for row in rows
+        ]
 
     async def conductor_merge_answers(self, job_id: str, answers: dict[str, Any]) -> dict[str, Any]:
         job = await self.get_job(job_id)
@@ -1182,6 +1214,10 @@ class VibeDevStore:
         )
         await self._conn.commit()
 
+        # Persist gate results if any
+        if gate_results:
+            await self._persist_gate_results(attempt_id, gate_results)
+
         return {"ok": True, "job_id": job_id, "step_count": len(step_ids), "step_order": step_ids}
 
     async def _count_steps(self, job_id: str) -> int:
@@ -1793,6 +1829,28 @@ class VibeDevStore:
 
         return failures
 
+    async def _persist_gate_results(self, attempt_id: str, gate_results: list[dict[str, Any]]) -> None:
+        """Persist gate evaluation results to the database."""
+        for result in gate_results:
+            result_id = _new_id("GATE")
+            await self._conn.execute(
+                """
+                INSERT INTO gate_results (result_id, attempt_id, gate_type, passed, description, details, output, exit_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    result_id,
+                    attempt_id,
+                    result["gate_type"],
+                    1 if result["passed"] else 0,
+                    result.get("description"),
+                    result.get("details"),
+                    result.get("output"),
+                    result.get("exit_code"),
+                ),
+            )
+        await self._conn.commit()
+
     async def job_set_ready(self, job_id: str) -> dict[str, Any]:
         job = await self.get_job(job_id)
         missing: list[str] = []
@@ -2185,14 +2243,28 @@ class VibeDevStore:
                             break
 
         gate_failures: list[str] = []
+        gate_results: list[dict[str, Any]] = []
         if not missing_fields and not (
             criteria_checklist_required and not criteria_checklist_all_true
         ):
+            # Temporarily call _evaluate_step_gates twice - once for failures, once for results
+            # TODO: Refactor _evaluate_step_gates to return tuple in future
             gate_failures = await self._evaluate_step_gates(
                 job_id=job_id,
                 step=step,
                 evidence=evidence,
             )
+            # For now, create mock gate results based on failures (will be enhanced later)
+            for failure in gate_failures:
+                gate_type = failure.split("'")[1] if "'" in failure else "unknown"
+                gate_results.append({
+                    "gate_type": gate_type,
+                    "passed": False,
+                    "description": failure,
+                    "details": None,
+                    "output": None,
+                    "exit_code": None,
+                })
 
         step_kind = str(step.get("step_kind") or "PROMPT").upper()
         is_condition = step_kind == "CONDITION"

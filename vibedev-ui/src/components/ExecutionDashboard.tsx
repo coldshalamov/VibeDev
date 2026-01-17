@@ -15,6 +15,9 @@ import {
   PlayIcon,
   XCircleIcon,
 } from '@heroicons/react/24/outline';
+import { GateResultsPanel, GateResultsPanelSkeleton } from './GateResultsPanel';
+import { useSWR } from 'swr';
+import { fetcher } from '@/lib/api';
 
 export function ExecutionDashboard() {
   const uiState = useVibeDevStore((state) => state.uiState);

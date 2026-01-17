@@ -423,8 +423,29 @@ def create_app(*, db_path: Path | None = None) -> FastAPI:
         return {"ok": True}
 
     # -------------------------------------------------------------------------
-    # Planning questions
+    # Gate results
     # -------------------------------------------------------------------------
+
+    @app.get("/api/jobs/{job_id}/steps/{step_id}/attempts/{attempt_id}/gate-results")
+    async def get_gate_results(job_id: str, step_id: str, attempt_id: str, request: Request) -> dict[str, Any]:
+        """Get detailed gate evaluation results for an attempt."""
+        store = store_from(request)
+        # Verify the attempt exists and belongs to this job/step
+        async with store._conn.execute(
+            "SELECT attempt_id FROM attempts WHERE attempt_id = ? AND job_id = ? AND step_id = ?",
+            (attempt_id, job_id, step_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Attempt not found")
+        
+        # Fetch gate results
+        gate_results = await store.get_gate_results(attempt_id=attempt_id)
+        return {"gate_results": gate_results}
+
+    # -------------------------------------------------------------------------
+    # Planning questions
+    # -------------------------------------------------------------------------"
 
     @app.get("/api/jobs/{job_id}/questions")
     async def get_questions(job_id: str, request: Request) -> dict[str, Any]:
