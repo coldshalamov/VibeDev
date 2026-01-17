@@ -89,7 +89,9 @@ class Policies(BaseModel):
     require_devlog_per_step: bool = True
     require_commit_per_step: bool = False
     allow_batch_commits: bool = True
-    require_tests_evidence: bool = True
+    # Changed from True to False to avoid contradiction with enable_shell_gates=False default
+    # Users can explicitly enable both if they want test verification via shell gates
+    require_tests_evidence: bool = False
     require_diff_summary: bool = True
     require_repo_snapshot_on_init: bool = False
     inject_invariants_every_step: bool = True

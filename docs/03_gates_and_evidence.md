@@ -205,6 +205,61 @@ Reasons: missing `tests_run`, missing `commands_run`, missing changed files list
 
 ---
 
+## Policy Validation and Combinations
+
+**Important:** Certain policy combinations are contradictory and will prevent jobs from completing. VibeDev uses the following defaults to avoid contradictions:
+
+### Default Policy Settings
+
+```python
+require_tests_evidence: False      # Don't require test evidence (safe default)
+enable_shell_gates: False          # Shell command gates disabled (security)
+shell_gate_allowlist: []           # Empty allowlist (security)
+```
+
+### Why These Defaults?
+
+If `require_tests_evidence=True` but `enable_shell_gates=False`, the job cannot proceed because:
+1. VibeDev requires `tests_run` and `tests_passed` fields in evidence
+2. But it cannot verify tests actually ran without shell gates
+3. All evidence submissions will be rejected as "unverifiable"
+
+### Recommended Policy Combinations
+
+**1. Permissive Mode (Default)**
+```python
+require_tests_evidence=False
+enable_shell_gates=False
+```
+Good for: Exploration, prototyping, research tasks
+
+**2. Strict Mode with Test Verification**
+```python
+require_tests_evidence=True
+enable_shell_gates=True
+shell_gate_allowlist=["*pytest*", "*npm test*", "*npm run test*"]
+```
+Good for: Production features, TDD workflows, CI/CD integration
+
+**3. Audit Mode**
+```python
+require_tests_evidence=True
+require_diff_summary=True
+enable_shell_gates=True
+shell_gate_allowlist=["*pytest*", "*npm test*", "*npm run lint*", "*npm run build*"]
+evidence_schema_mode="strict"
+```
+Good for: Regulated environments, compliance requirements
+
+### Validation Rules
+
+When creating a job, VibeDev checks:
+- If `require_tests_evidence=True`, warn if `enable_shell_gates=False`
+- If `enable_shell_gates=True` and `shell_gate_allowlist` is empty, warn that no commands can run
+- If any `command_exit_0` gates exist, ensure `enable_shell_gates=True` and allowlist is non-empty
+
+---
+
 ## Compilation Surface
 
 | Doc Section | Maps To | Field/Policy |
@@ -213,3 +268,4 @@ Reasons: missing `tests_run`, missing `commands_run`, missing changed files list
 | Gate types | StepTemplate fields | `StepTemplate.gates[]` |
 | Truthfulness semantics | Verifier behavior | (Verifier policy) |
 | Human approval | FlowGraph transition | `RunnerAction.PAUSE_FOR_HUMAN` / UI |
+| Policy validation | Job creation | `Policies` model in `models.py` |

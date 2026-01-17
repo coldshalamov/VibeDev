@@ -7,22 +7,26 @@ import { HorizontalStepFlow, type Flow } from './HorizontalStepFlow';
 import { useVibeDevStore } from '@/stores/useVibeDevStore';
 import { compileUnifiedWorkflow, saveUIState } from '@/lib/api';
 
-const PHASE_LABELS: Record<string, { title: string; description: string }> = {
+const PHASE_LABELS: Record<string, { title: string; description: string; icon: string }> = {
     research: {
         title: 'Research',
         description: 'Explore the codebase and gather context',
+        icon: '🔍'
     },
     planning: {
         title: 'Planning',
         description: 'Design the implementation strategy',
+        icon: '📐'
     },
     execution: {
         title: 'Execution',
         description: 'Implement the actual changes',
+        icon: '⚡'
     },
     review: {
         title: 'Review',
         description: 'Verify and clean up',
+        icon: '📊'
     },
 };
 
@@ -180,10 +184,10 @@ export function UnifiedWorkflowView({ phase }: Props) {
     if (!currentJobId || !uiState) {
         return (
             <div className="flex h-full items-center justify-center text-muted-foreground/60">
-                <div className="text-center">
-                    <div className="text-4xl mb-4">🚀</div>
-                    <p className="text-lg font-medium">No active job</p>
-                    <p className="text-sm">Create or select a job to start</p>
+                <div className="text-center animate-pulse">
+                    <div className="text-5xl mb-6 opacity-30">🚀</div>
+                    <p className="text-lg font-medium">Awaiting Mission Context</p>
+                    <p className="text-sm opacity-50 mt-2">Create or select a job to initialize system.</p>
                 </div>
             </div>
         );
@@ -191,42 +195,51 @@ export function UnifiedWorkflowView({ phase }: Props) {
 
     return (
         <div className="h-full flex flex-col">
-            {/* Phase Header */}
+            {/* Phase Header - Glass Bar */}
             {phase && (
-                <div className="px-6 py-3 border-b border-white/5 bg-card/50">
+                <div className="px-6 py-4 border-b border-white/5 bg-background/20 backdrop-blur-sm z-20 flex-shrink-0">
                     <div className="flex items-center justify-between">
-                        <div>
-                            <h2 className="text-lg font-bold text-primary">{PHASE_LABELS[phase].title} Workflow</h2>
-                            <p className="text-xs text-muted-foreground mt-0.5">{PHASE_LABELS[phase].description}</p>
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-xl shadow-[0_0_15px_-5px_rgba(var(--primary),0.3)]">
+                                {PHASE_LABELS[phase].icon}
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                                    {PHASE_LABELS[phase].title}
+                                    <span className="text-[10px] font-mono text-muted-foreground bg-white/5 px-2 py-0.5 rounded-full border border-white/5 uppercase tracking-wide">
+                                        Phase {['research', 'planning', 'execution', 'review'].indexOf(phase) + 1}/4
+                                    </span>
+                                </h2>
+                                <p className="text-xs text-muted-foreground mt-0.5">{PHASE_LABELS[phase].description}</p>
+                            </div>
                         </div>
-                        <div className="text-[10px] font-mono text-white bg-black/20 px-2 py-1 rounded border border-white/5">
-                            Phase {['research', 'planning', 'execution', 'review'].indexOf(phase) + 1}/4
-                        </div>
+
+                        {!lockCompletedSteps && (
+                            <div className="mt-2 flex items-center justify-end gap-2">
+                                <button
+                                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 active:scale-95"
+                                    onClick={() => {
+                                        if (!currentJobId) return;
+                                        void compileUnifiedWorkflow(currentJobId).catch((err) => {
+                                            console.error('Failed to compile workflow:', err);
+                                            alert('Failed to compile workflow. Check console for details.');
+                                        });
+                                    }}
+                                    disabled={!currentJobId}
+                                    title="Process steps into executable task chain"
+                                >
+                                    Compile Chain
+                                </button>
+                            </div>
+                        )}
                     </div>
-                    {!lockCompletedSteps && (
-                        <div className="mt-2 flex items-center justify-end gap-2">
-                            <button
-                                className="px-3 py-1.5 text-xs font-bold rounded bg-primary/15 hover:bg-primary/25 border border-primary/30 text-primary transition-colors"
-                                onClick={() => {
-                                    if (!currentJobId) return;
-                                    void compileUnifiedWorkflow(currentJobId).catch((err) => {
-                                        console.error('Failed to compile workflow:', err);
-                                        alert('Failed to compile workflow. Check console for details.');
-                                    });
-                                }}
-                                disabled={!currentJobId}
-                                title="Optional: compile this workflow into runnable backend steps"
-                            >
-                                Compile Workflow
-                            </button>
-                        </div>
-                    )}
                 </div>
             )}
 
-            <div className="flex-1 flex min-h-0">
+            <div className="flex-1 flex min-h-0 relative">
+                <div className="absolute inset-0 bg-grid-pattern opacity-10 pointer-events-none" />
                 {/* Main Editor - now takes full width */}
-                <div className="flex-1 overflow-hidden">
+                <div className="flex-1 overflow-hidden z-10">
                     <HorizontalStepFlow
                         flow={flow}
                         onChange={setFlow}

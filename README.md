@@ -134,6 +134,49 @@ Then create a skill that calls the MCP's `job_next_step_prompt` tool to advance 
 - Override DB path: `set VIBEDEV_DB_PATH=C:\path\to\vibedev.sqlite3`
 - Override HTTP port: `set VIBEDEV_HTTP_PORT=8765`
 
+### Policy Configuration
+
+VibeDev jobs use policies to enforce quality standards and evidence requirements. The default policies are designed to be **safe and permissive**:
+
+**Default Policy Settings:**
+```python
+require_tests_evidence: False      # Don't require test evidence by default
+enable_shell_gates: False          # Shell command gates disabled by default
+require_diff_summary: True         # Require diff summaries
+require_devlog_per_step: True      # Require devlog entries
+evidence_schema_mode: "loose"      # Allow flexible evidence formats
+```
+
+**Policy Combinations:**
+
+1. **Permissive (Default)** - Good for exploration and prototyping
+   ```python
+   require_tests_evidence=False
+   enable_shell_gates=False
+   ```
+
+2. **Strict with Test Verification** - Good for production features
+   ```python
+   require_tests_evidence=True
+   enable_shell_gates=True
+   shell_gate_allowlist=["*pytest*", "*npm test*"]
+   ```
+
+3. **Audit Mode** - For regulated environments
+   ```python
+   require_tests_evidence=True
+   require_diff_summary=True
+   enable_shell_gates=True
+   shell_gate_allowlist=["*pytest*", "*npm test*", "*npm run lint*"]
+   evidence_schema_mode="strict"
+   ```
+
+**Important:** If you enable `require_tests_evidence=True`, you must also:
+- Set `enable_shell_gates=True`
+- Provide a non-empty `shell_gate_allowlist` (e.g., `["*pytest*"]`)
+
+Otherwise, VibeDev cannot verify test execution and will reject all evidence submissions.
+
 ## Architecture
 
 VibeDev maintains three types of state across conversation threads:

@@ -12,6 +12,7 @@ Tests cover:
 
 import os
 import shutil
+import subprocess
 import tempfile
 import pytest
 
@@ -505,7 +506,7 @@ async def test_git_status_with_repo():
         # Create a minimal git repo
         repo_dir = os.path.join(tmp_dir, "repo")
         os.makedirs(repo_dir)
-        os.system(f'cd "{repo_dir}" && git init -q')
+        subprocess.run(["git", "init", "-q"], cwd=repo_dir, check=True)
         with open(os.path.join(repo_dir, "test.txt"), "w") as f:
             f.write("test")
 
