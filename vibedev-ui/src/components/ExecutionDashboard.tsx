@@ -10,6 +10,7 @@ import {
   ArrowPathIcon,
   BeakerIcon,
   CheckCircleIcon,
+  ChevronRightIcon,
   CommandLineIcon,
   PauseIcon,
   PlayIcon,
@@ -108,6 +109,26 @@ function StartExecutionView({ jobId }: { jobId: string }) {
           {startMutation.isPending ? 'Initiating Sequence...' : 'INITIALIZE EXECUTION'}
         </button>
       </div>
+
+      {/* Previous Attempts with Gate Results */}
+      {attempts && attempts.length > 0 && (
+        <div className="glass-panel p-4 max-h-80 overflow-y-auto custom-scrollbar">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
+            Previous Attempts
+          </h3>
+          <div className="space-y-4">
+            {attempts.map((attempt: any, index: number) => (
+              <PreviousAttemptView
+                key={attempt.attempt_id}
+                attempt={attempt}
+                attemptNumber={index + 1}
+                jobId={jobId}
+                stepId={step.step_id}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -426,6 +447,61 @@ function GlassBoxPanel({ step, attempts, jobId }: { step: any; attempts: any[]; 
         </div>
       )}
     </div>
+  );
+}
+
+// =============================================================================
+// Previous Attempt View with Gate Results
+// =============================================================================
+
+function PreviousAttemptView({
+  attempt,
+  attemptNumber,
+  jobId,
+  stepId,
+}: {
+  attempt: any;
+  attemptNumber: number;
+  jobId: string;
+  stepId: string;
+}) {
+  const { data: gateResultsData, error, isLoading } = useSWR(
+    attempt?.attempt_id ? `/api/jobs/${jobId}/steps/${stepId}/attempts/${attempt.attempt_id}/gate-results` : null,
+    fetcher
+  );
+
+  return (
+    <details className="group border rounded-lg p-3 bg-black/20 border-white/5" open={attemptNumber === 1}>
+      <summary className="flex items-center justify-between cursor-pointer list-none">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-mono text-muted-foreground">Attempt #{attemptNumber}</span>
+          {attempt.outcome === 'accepted' ? (
+            <span className="text-xs px-2 py-1 rounded bg-green-500/20 text-green-300">Accepted</span>
+          ) : (
+            <span className="text-xs px-2 py-1 rounded bg-red-500/20 text-red-300">Rejected</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{new Date(attempt.timestamp).toLocaleString()}</span>
+          <ChevronRightIcon className="w-4 h-4 text-muted-foreground group-open:rotate-90 transition-transform" />
+        </div>
+      </summary>
+      
+      <div className="mt-4 pt-4 border-t border-white/5">
+        {isLoading ? (
+          <GateResultsPanelSkeleton />
+        ) : error ? (
+          <div className="text-sm text-red-400">Failed to load gate results</div>
+        ) : (
+          <GateResultsPanel
+            jobId={jobId}
+            stepId={stepId}
+            attemptId={attempt.attempt_id}
+            gateResults={gateResultsData?.gate_results || []}
+          />
+        )}
+      </div>
+    </details>
   );
 }
 
